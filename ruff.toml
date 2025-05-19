@@ -1,0 +1,4 @@
+line-length = 100
+extend-select = ["I"]
+src = ["src"]
+target-version = "py313"
