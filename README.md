@@ -1,6 +1,6 @@
 # SGraph MCP Server
 
-An MCP (Model Context Protocol) server that provides AI agents with efficient access to software structure and dependency information through cached [sgraph](https://github.com/softagram/sgraph) models.
+An MCP (Model Context Protocol) server that provides AI agents with efficient access to software structure and dependency information through cached [sgraph](https://softagram.github.io/sgraph) models. See the full sgraph documentation at [softagram.github.io/sgraph](https://softagram.github.io/sgraph).
 
 ## Overview
 
@@ -212,4 +212,4 @@ uv run src/server.py
 
 ## About SGraph
 
-This server uses the [sgraph library](https://github.com/softagram/sgraph) from Softagram, which provides data formats, structures and algorithms for hierarchic graph structures. The library is particularly well-suited for representing software structures with its minimalist XML format and high-performance design.
+This server uses the [sgraph library](https://softagram.github.io/sgraph) from Softagram, which provides data formats, structures and algorithms for hierarchic graph structures. The library is particularly well-suited for representing software structures with its minimalist XML format and high-performance design. For guides and API reference, visit [sgraph docs](https://softagram.github.io/sgraph).

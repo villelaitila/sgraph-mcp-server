@@ -592,6 +592,7 @@
 <p>The server listens on <code>http://localhost:8008/sse</code>.</p>
 <h2 id="configure-mcp-in-your-ide">Configure MCP in your IDE<a class="headerlink" href="#configure-mcp-in-your-ide" title="Permanent link">&para;</a></h2>
 <p>Add an MCP server named <code>sgraph-mcp</code> pointing to the SSE URL above. Then list tools and call <code>sgraph_load_model</code> with your model path.</p>
+<p>Tip: New to SGraph? See the library docs for data structures and formats: <a href="https://softagram.github.io/sgraph">https://softagram.github.io/sgraph</a>.</p>
 <h2 id="quick-test-via-cli">Quick test via CLI<a class="headerlink" href="#quick-test-via-cli" title="Permanent link">&para;</a></h2>
 <div class="codehilite"><pre><span></span><code><span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;tools/list&quot;,&quot;params&quot;:{}}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>npx<span class="w"> </span>-y<span class="w"> </span>mcp-remote<span class="w"> </span>http://localhost:8008/sse
 </code></pre></div>
