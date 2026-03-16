@@ -35,7 +35,7 @@ Add to Claude Code's MCP config (`.mcp.json` in project root):
 }
 ```
 
-## The 5 Tools
+## The 7 Tools
 
 | Tool | Purpose | When to Use |
 |------|---------|-------------|
@@ -43,7 +43,9 @@ Add to Claude Code's MCP config (`.mcp.json` in project root):
 | `sgraph_search_elements` | Find symbols by name | When you know name but not path |
 | `sgraph_get_element_dependencies` | Query dependencies | Before modifying code |
 | `sgraph_get_element_structure` | Explore hierarchy | Instead of Read to see contents |
-| `sgraph_analyze_change_impact` | Full impact analysis | Before any public interface change |
+| `sgraph_analyze_change_impact` | Impact analysis with warnings | Before any public interface change |
+| `sgraph_audit` | Architectural health checks | Tech debt reviews, onboarding |
+| `sgraph_resolve_local_path` | Map sgraph path to filesystem | When you need to read source code |
 
 ## Output Format
 
@@ -212,7 +214,12 @@ sgraph_analyze_change_impact(
 
 **Output:**
 ```
-impact: 3 callers, 2 files, 1 modules
+impact: 3 callers, 2 files, 2 modules
+
+WARNING dependency_cycle: bidirectional deps with 1 module(s) — blast radius likely exceeds listed callers
+  <-> /project/src/middleware
+
+WARNING hub_element: 42 outgoing deps — changes here cascade widely
 
 detailed (3):
 /project/src/api/endpoints.py/UserEndpoint/get_profile
@@ -220,20 +227,69 @@ detailed (3):
 /project/src/middleware/auth.py/require_auth
 
 by_file (2):
+/project/src/api/endpoints.py
+/project/src/middleware/auth.py
+
+by_module (2):
 /project/src/api
 /project/src/middleware
-
-by_module (1):
-/project/src
 ```
 
-First line is a summary. Then three sections show the same callers aggregated at different levels.
+First line is a summary. Warnings appear only when detected:
+- **dependency_cycle**: bidirectional module deps — changes may cascade in both directions
+- **hub_element**: >30 outgoing deps — high-coupling element
+
+Then three sections show callers at different aggregation levels.
 
 **When to use:**
 - Before changing function signature -> see all call sites
 - Before renaming class -> see all importers
 - Before deleting code -> verify nothing depends on it
 - Planning refactoring -> understand blast radius
+
+---
+
+### sgraph_audit
+
+**Architectural health checks** — for occasional tech debt reviews, not daily use.
+
+```python
+sgraph_audit(
+    scope_path="/project/src",
+    checks=["cycles", "hubs"],
+    aggregation_level=3
+)
+```
+
+**Output:**
+```
+audit: 12 modules, 45 dependencies
+
+cycles (2):
+  /project/src/core <-> /project/src/api (12→, 5←)
+  /project/src/auth <-> /project/src/middleware (3→, 2←)
+
+most_dependent:
+  /project/src/api (8 outgoing)
+  /project/src/core (6 outgoing)
+
+most_depended_upon:
+  /project/src/models (9 incoming)
+  /project/src/utils (7 incoming)
+```
+
+**aggregation_level** controls granularity:
+| Level | Meaning | Example |
+|-------|---------|---------|
+| `2` | Component level | `/project/component` (good for monorepos) |
+| `3` | Module level | `/project/component/module` (default) |
+| `4+` | Sub-module level | Deeper nesting |
+
+**When to use:**
+- Tech debt reviews -> find circular dependencies
+- New developer onboarding -> understand module coupling
+- Architecture audits -> identify hub modules
+- **Not** during regular feature development (use `analyze_change_impact` instead)
 
 ---
 

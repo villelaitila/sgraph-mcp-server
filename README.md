@@ -45,7 +45,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed design documentation.
 
 ### MCP Tools by Profile
 
-#### Claude Code Profile (5 tools, plain text output)
+#### Claude Code Profile (7 tools, plain text output)
 
 All Claude Code tools return **plain text using TOON line notation** instead of JSON, minimizing token usage.
 
@@ -55,7 +55,8 @@ All Claude Code tools return **plain text using TOON line notation** instead of 
 | `sgraph_search_elements` | Find elements by name pattern | `N/M matches` + `/path [type] name` lines |
 | `sgraph_get_element_dependencies` | Query incoming/outgoing deps | `-> /target (type)` or `/source (type) ->` |
 | `sgraph_get_element_structure` | Explore hierarchy without reading source | Indented `/path [type] name` tree |
-| `sgraph_analyze_change_impact` | Multi-level impact analysis | Summary + paths grouped by aggregation level |
+| `sgraph_analyze_change_impact` | Impact analysis with warnings | Summary + cycle/hub warnings + paths by level |
+| `sgraph_audit` | Architectural health checks | Cycles, hub modules, summary metrics |
 
 Key features:
 - **`include_descendants`** on dependencies: shows which child element owns each dependency using relative paths (no leading `/`)
@@ -167,7 +168,7 @@ The server supports multiple profiles optimized for different use cases:
 | Profile | Tools | Output | Use Case |
 |---------|-------|--------|----------|
 | `legacy` | 14 | JSON | Full tool set (backwards compatible, default) |
-| `claude-code` | 5 | Plain text (TOON) | AI-assisted development (token-optimized) |
+| `claude-code` | 7 | Plain text (TOON) | AI-assisted development (token-optimized) |
 
 ### Run the server
 
@@ -175,7 +176,7 @@ The server supports multiple profiles optimized for different use cases:
 # Default (legacy profile with all 14 tools)
 uv run python -m src.server
 
-# Claude Code optimized (5 tools, plain text TOON output)
+# Claude Code optimized (7 tools, plain text TOON output)
 uv run python -m src.server --profile claude-code
 
 # Explicit legacy

@@ -6,12 +6,13 @@ Tools:
 - sgraph_search_elements: Find elements by name within scope
 - sgraph_get_element_dependencies: Dependencies with result_level abstraction
 - sgraph_get_element_structure: Hierarchy navigation (children)
-- sgraph_analyze_change_impact: Multi-level impact analysis
+- sgraph_analyze_change_impact: Multi-level impact analysis (with cycle/hub warnings)
+- sgraph_audit: Architectural health checks (cycles, hubs) — for occasional reviews
 
 Design principles:
 - Paths as first-class citizens (unambiguous element identification)
 - Abstraction as query parameter (result_level: function/file/module)
-- Progressive disclosure (5 tools vs 13+)
+- Progressive disclosure (7 tools vs 13+)
 - Plain text TOON output (line-oriented, no JSON wrappers)
 """
 
@@ -100,6 +101,30 @@ def _collect_deps(element, base_path: str, direction: str, result_level, include
     return lines
 
 
+def _get_parent_dir(path: str) -> str:
+    """Get the parent directory of the file containing an element.
+
+    For /project/src/module/file.py/ClassName → /project/src/module
+    For /project/src/module/file.py → /project/src/module
+    For /project/src/module (directory, no dot) → /project/src/module (itself)
+    """
+    parts = path.split("/")
+    for i, part in enumerate(parts):
+        if "." in part:  # Found file (has extension)
+            return "/".join(parts[:i])
+    # No file segment found — path is a directory, return it as-is
+    return path
+
+
+def _get_file_path(path: str) -> str:
+    """Extract the file path from an element path (up to and including the .ext segment)."""
+    parts = path.split("/")
+    for i, part in enumerate(parts):
+        if "." in part:
+            return "/".join(parts[:i + 1])
+    return path
+
+
 # =============================================================================
 # Input Schemas
 # =============================================================================
@@ -156,6 +181,23 @@ class AnalyzeChangeImpactInput(BaseModel):
     """Input for sgraph_analyze_change_impact."""
     model_id: Optional[str] = Field(default=None, description="Model ID (omit to use auto-loaded default)")
     element_path: str = Field(description="Element being modified")
+
+
+class AuditInput(BaseModel):
+    """Input for sgraph_audit — architectural health checks."""
+    model_id: Optional[str] = Field(default=None, description="Model ID (omit to use auto-loaded default)")
+    scope_path: Optional[str] = Field(
+        default=None,
+        description="Limit analysis to subtree (e.g., '/project/src')"
+    )
+    checks: list[Literal["cycles", "hubs"]] = Field(
+        default=["cycles", "hubs"],
+        description="Checks to run: 'cycles' (circular deps), 'hubs' (high-coupling modules)"
+    )
+    aggregation_level: int = Field(
+        default=3,
+        description="Directory depth for module grouping (3='/project/component/module')"
+    )
 
 
 class ResolveLocalPathInput(BaseModel):
@@ -420,6 +462,10 @@ class ClaudeCodeProfile:
             - by_file: Which files would need changes
             - by_module: Which modules/repos are affected
 
+            Automatic warnings (when detected):
+            - dependency_cycle: bidirectional module deps — blast radius exceeds listed callers
+            - hub_element: >30 outgoing deps — changes cascade widely
+
             When to use:
             - Before changing function signature -> see all call sites
             - Before renaming class -> see all importers
@@ -440,25 +486,79 @@ class ClaudeCodeProfile:
                 return {"error": f"Element not found: {input.element_path}"}
 
             try:
+                # Collect all elements in subtree (element + children, recursive)
+                # This ensures file-level analysis captures deps on classes/functions inside
+                subtree = []
+                stack = [element]
+                while stack:
+                    e = stack.pop()
+                    subtree.append(e)
+                    stack.extend(e.children)
+                subtree_paths = {e.getPath() for e in subtree}
+
+                # Collect all incoming (what uses this element or its children)
                 detailed = []
                 files = set()
                 modules = set()
+                incoming_dirs = set()
 
-                for assoc in element.incoming:
-                    source_path = assoc.fromElement.getPath()
-                    detailed.append(source_path)
+                for e in subtree:
+                    for assoc in e.incoming:
+                        source_path = assoc.fromElement.getPath()
+                        if source_path in subtree_paths:
+                            continue
+                        if "/External/" in source_path:
+                            continue
+                        detailed.append(source_path)
+                        files.add(_get_file_path(source_path))
+                        modules.add(_get_parent_dir(source_path))
+                        incoming_dirs.add(_get_parent_dir(source_path))
 
-                    parts = source_path.split("/")
-                    if len(parts) >= 3:
-                        files.add("/".join(parts[:3]))
-                    if len(parts) >= 2:
-                        modules.add("/".join(parts[:2]))
+                # Collect outgoing deps for cycle/hub warnings
+                outgoing_dirs = set()
+                outgoing_count_non_external = 0
 
+                for e in subtree:
+                    for assoc in e.outgoing:
+                        target_path = assoc.toElement.getPath()
+                        if "/External/" in target_path:
+                            continue
+                        if target_path in subtree_paths:
+                            continue
+                        outgoing_count_non_external += 1
+                        outgoing_dirs.add(_get_parent_dir(target_path))
+
+                # Detect cycles: directories in both incoming and outgoing
+                element_dir = _get_parent_dir(input.element_path)
+                incoming_dirs.discard(element_dir)
+                outgoing_dirs.discard(element_dir)
+                cycle_dirs = incoming_dirs & outgoing_dirs
+
+                # Build output
                 sections = [
                     f"impact: {len(detailed)} callers, {len(files)} files, {len(modules)} modules",
-                    "",
-                    f"detailed ({len(detailed)}):",
                 ]
+
+                # Warnings
+                if cycle_dirs:
+                    sections.append("")
+                    sections.append(
+                        f"WARNING dependency_cycle: bidirectional deps with "
+                        f"{len(cycle_dirs)} module(s) — blast radius likely exceeds listed callers"
+                    )
+                    for d in sorted(cycle_dirs):
+                        sections.append(f"  <-> {d}")
+
+                # Hub threshold: 30 outgoing non-external deps indicates high coupling
+                if outgoing_count_non_external > 30:
+                    sections.append("")
+                    sections.append(
+                        f"WARNING hub_element: {outgoing_count_non_external} outgoing "
+                        f"deps — changes here cascade widely"
+                    )
+
+                sections.append("")
+                sections.append(f"detailed ({len(detailed)}):")
                 sections.extend(detailed) if detailed else sections.append("  (none)")
                 sections.append("")
                 sections.append(f"by_file ({len(files)}):")
@@ -470,6 +570,95 @@ class ClaudeCodeProfile:
                 return "\n".join(sections)
             except Exception as e:
                 return f"error: Impact analysis failed: {e}"
+
+        @mcp.tool()
+        async def sgraph_audit(input: AuditInput):
+            """Run architectural health checks on the codebase. For occasional reviews, not daily use.
+
+            Available checks:
+            - "cycles": Find circular module dependencies (A depends on B, B depends on A)
+            - "hubs": Find modules with unusually high coupling (many dependencies)
+
+            aggregation_level controls module granularity:
+            - 2: /project/component (coarse, good for monorepos)
+            - 3: /project/component/module (default)
+            - 4+: deeper nesting for fine-grained analysis
+
+            Returns plain text with cycles, hub modules, and summary metrics.
+            """
+            mid = input.model_id or model_manager.default_model_id
+            if not mid:
+                return {"error": "No model loaded. Call sgraph_load_model first."}
+            model = model_manager.get_model(mid)
+            if model is None:
+                return {"error": f"Model '{mid}' not found"}
+
+            try:
+                analysis = DependencyService.get_high_level_dependencies(
+                    model,
+                    scope_path=input.scope_path,
+                    aggregation_level=input.aggregation_level,
+                    include_external=False,
+                    include_metrics=True,
+                )
+
+                if "error" in analysis:
+                    return f"error: {analysis['error']}"
+
+                sections = [
+                    f"audit: {analysis.get('total_modules', 0)} modules, "
+                    f"{analysis.get('total_dependencies', 0)} dependencies",
+                ]
+
+                if "cycles" in input.checks:
+                    cycles = analysis.get("metrics", {}).get(
+                        "circular_dependencies", []
+                    )
+                    sections.append("")
+                    sections.append(f"cycles ({len(cycles)}):")
+                    if cycles:
+                        for c in cycles:
+                            sections.append(
+                                f"  {c['module1']} <-> {c['module2']} "
+                                f"({c['count_1_to_2']}→, {c['count_2_to_1']}←)"
+                            )
+                    else:
+                        sections.append("  (none)")
+
+                if "hubs" in input.checks:
+                    modules = analysis.get("modules", [])
+                    hub_threshold = 5
+                    outgoing_hubs = sorted(
+                        [m for m in modules if m["outgoing_count"] >= hub_threshold],
+                        key=lambda x: x["outgoing_count"],
+                        reverse=True,
+                    )[:10]
+                    incoming_hubs = sorted(
+                        [m for m in modules if m["incoming_count"] >= hub_threshold],
+                        key=lambda x: x["incoming_count"],
+                        reverse=True,
+                    )[:10]
+
+                    sections.append("")
+                    sections.append("most_dependent:")
+                    if outgoing_hubs:
+                        for m in outgoing_hubs:
+                            sections.append(f"  {m['path']} ({m['outgoing_count']} outgoing)")
+                    else:
+                        sections.append("  (none)")
+
+                    sections.append("")
+                    sections.append("most_depended_upon:")
+                    if incoming_hubs:
+                        for m in incoming_hubs:
+                            sections.append(f"  {m['path']} ({m['incoming_count']} incoming)")
+                    else:
+                        sections.append("  (none)")
+
+                return "\n".join(sections)
+
+            except Exception as e:
+                return f"error: Audit failed: {e}"
 
         @mcp.tool()
         async def sgraph_resolve_local_path(input: ResolveLocalPathInput):
