@@ -49,13 +49,7 @@ Add to Claude Code's MCP config (`.mcp.json` in project root):
 
 ## Output Format
 
-All tools return **plain text using TOON (Token-Optimized Object Notation) line notation** - not JSON. This minimizes token usage and is easier for LLMs to parse.
-
-Each tool has its own TOON line format:
-- **search_elements**: `/path [type] name`
-- **get_element_dependencies**: `-> /target (type)` or `/source (type) ->`
-- **get_element_structure**: indented `/path [type] name`
-- **analyze_change_impact**: sections with paths grouped by aggregation level
+All tools return **JSON** — structured data that LLMs parse reliably regardless of nesting depth.
 
 ---
 
@@ -91,14 +85,16 @@ sgraph_search_elements(
 ```
 
 **Output:**
+```json
+{
+  "shown": 3, "total": 12,
+  "elements": [
+    {"path": "/project/src/core/model_manager.py/ModelManager", "type": "class", "name": "ModelManager"},
+    {"path": "/project/src/auth/session_manager.py/SessionManager", "type": "class", "name": "SessionManager"},
+    {"path": "/project/src/cache/cache_manager.py/CacheManager", "type": "class", "name": "CacheManager"}
+  ]
+}
 ```
-3/12 matches
-/project/src/core/model_manager.py/ModelManager [class] ModelManager
-/project/src/auth/session_manager.py/SessionManager [class] SessionManager
-/project/src/cache/cache_manager.py/CacheManager [class] CacheManager
-```
-
-First line: `shown/total matches`. Each subsequent line: `/path [type] name`.
 
 **Parameters:**
 - `query`: Wildcards (`*Service*`), regex (`.*Service.*`), or substring (`Service`)
@@ -129,26 +125,33 @@ sgraph_get_element_dependencies(
 ```
 
 **Output (element's own dependencies):**
-```
-outgoing (2):
--> /project/src/db/user_repo.py/UserRepo (call)
--> /project/src/crypto/service.py/hash (call)
-incoming (3):
-/project/src/api/endpoints.py/get_user (call) ->
-/project/src/api/endpoints.py/delete_user (call) ->
-/project/src/middleware/auth.py/check (call) ->
+```json
+{
+  "outgoing": [
+    {"direction": "outgoing", "target": "/project/src/db/user_repo.py/UserRepo", "type": "call"},
+    {"direction": "outgoing", "target": "/project/src/crypto/service.py/hash", "type": "call"}
+  ],
+  "incoming": [
+    {"direction": "incoming", "source": "/project/src/api/endpoints.py/get_user", "type": "call"},
+    {"direction": "incoming", "source": "/project/src/api/endpoints.py/delete_user", "type": "call"},
+    {"direction": "incoming", "source": "/project/src/middleware/auth.py/check", "type": "call"}
+  ]
+}
 ```
 
 **Output (with `include_descendants=True`):**
-```
-outgoing (4):
--> /external/requests (import)
-AuthManager/validate -> /project/src/db/user_repo.py/UserRepo (call)
-AuthManager/validate -> /project/src/crypto/service.py/hash (call)
-AuthManager/refresh -> /project/src/cache/store.py/TokenStore (call)
+```json
+{
+  "outgoing": [
+    {"direction": "outgoing", "target": "/external/requests", "type": "import"},
+    {"direction": "outgoing", "target": "/project/src/db/user_repo.py/UserRepo", "type": "call", "from_descendant": "AuthManager/validate"},
+    {"direction": "outgoing", "target": "/project/src/crypto/service.py/hash", "type": "call", "from_descendant": "AuthManager/validate"},
+    {"direction": "outgoing", "target": "/project/src/cache/store.py/TokenStore", "type": "call", "from_descendant": "AuthManager/refresh"}
+  ]
+}
 ```
 
-Relative paths (no leading `/`) identify which descendant owns the dependency. Absolute paths (leading `/`) are the targets.
+`from_descendant` / `to_descendant` fields identify which child element owns the dependency.
 
 **Parameters:**
 | Parameter | Description |
@@ -181,16 +184,22 @@ sgraph_get_element_structure(
 ```
 
 **Output:**
+```json
+{
+  "path": "/project/src/services", "type": "dir", "name": "services",
+  "children": [
+    {"path": "/project/src/services/auth_service.py", "type": "file", "name": "auth_service.py",
+     "children": [
+       {"path": "/project/src/services/auth_service.py/AuthService", "type": "class", "name": "AuthService"},
+       {"path": "/project/src/services/auth_service.py/validate_token", "type": "function", "name": "validate_token"}
+     ]},
+    {"path": "/project/src/services/user_service.py", "type": "file", "name": "user_service.py",
+     "children": [
+       {"path": "/project/src/services/user_service.py/UserService", "type": "class", "name": "UserService"}
+     ]}
+  ]
+}
 ```
-/project/src/services [dir] services
-  /project/src/services/auth_service.py [file] auth_service.py
-    /project/src/services/auth_service.py/AuthService [class] AuthService
-    /project/src/services/auth_service.py/validate_token [function] validate_token
-  /project/src/services/user_service.py [file] user_service.py
-    /project/src/services/user_service.py/UserService [class] UserService
-```
-
-Indentation shows hierarchy. Each line: `/path [type] name`.
 
 **Parameters:**
 - `max_depth`: `1` = direct children only, `2` = two levels (usually sufficient), `3+` = deeper
@@ -213,33 +222,26 @@ sgraph_analyze_change_impact(
 ```
 
 **Output:**
-```
-impact: 3 callers, 2 files, 2 modules
-
-WARNING dependency_cycle: bidirectional deps with 1 module(s) — blast radius likely exceeds listed callers
-  <-> /project/src/middleware
-
-WARNING hub_element: 42 outgoing deps — changes here cascade widely
-
-detailed (3):
-/project/src/api/endpoints.py/UserEndpoint/get_profile
-/project/src/api/endpoints.py/AdminEndpoint/delete_user
-/project/src/middleware/auth.py/require_auth
-
-by_file (2):
-/project/src/api/endpoints.py
-/project/src/middleware/auth.py
-
-by_module (2):
-/project/src/api
-/project/src/middleware
+```json
+{
+  "summary": {"callers": 3, "files": 2, "modules": 2},
+  "warnings": [
+    {"type": "dependency_cycle", "message": "Bidirectional deps with 1 module(s)...", "modules": ["/project/src/middleware"]},
+    {"type": "hub_element", "message": "42 outgoing deps — changes here cascade widely"}
+  ],
+  "detailed": [
+    "/project/src/api/endpoints.py/UserEndpoint/get_profile",
+    "/project/src/api/endpoints.py/AdminEndpoint/delete_user",
+    "/project/src/middleware/auth.py/require_auth"
+  ],
+  "by_file": ["/project/src/api/endpoints.py", "/project/src/middleware/auth.py"],
+  "by_module": ["/project/src/api", "/project/src/middleware"]
+}
 ```
 
-First line is a summary. Warnings appear only when detected:
+Warnings appear only when detected:
 - **dependency_cycle**: bidirectional module deps — changes may cascade in both directions
 - **hub_element**: >30 outgoing deps — high-coupling element
-
-Then three sections show callers at different aggregation levels.
 
 **When to use:**
 - Before changing function signature -> see all call sites
@@ -262,20 +264,22 @@ sgraph_audit(
 ```
 
 **Output:**
-```
-audit: 12 modules, 45 dependencies
-
-cycles (2):
-  /project/src/core <-> /project/src/api (12→, 5←)
-  /project/src/auth <-> /project/src/middleware (3→, 2←)
-
-most_dependent:
-  /project/src/api (8 outgoing)
-  /project/src/core (6 outgoing)
-
-most_depended_upon:
-  /project/src/models (9 incoming)
-  /project/src/utils (7 incoming)
+```json
+{
+  "total_modules": 12, "total_dependencies": 45,
+  "cycles": [
+    {"module1": "/project/src/core", "module2": "/project/src/api", "forward": 12, "backward": 5},
+    {"module1": "/project/src/auth", "module2": "/project/src/middleware", "forward": 3, "backward": 2}
+  ],
+  "most_dependent": [
+    {"path": "/project/src/api", "outgoing": 8},
+    {"path": "/project/src/core", "outgoing": 6}
+  ],
+  "most_depended_upon": [
+    {"path": "/project/src/models", "incoming": 9},
+    {"path": "/project/src/utils", "incoming": 7}
+  ]
+}
 ```
 
 **aggregation_level** controls granularity:

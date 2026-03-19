@@ -13,7 +13,7 @@ Design principles:
 - Paths as first-class citizens (unambiguous element identification)
 - Abstraction as query parameter (result_level: function/file/module)
 - Progressive disclosure (7 tools vs 13+)
-- Plain text TOON output (line-oriented, no JSON wrappers)
+- JSON output for reliable parsing by LLMs
 """
 
 from typing import Optional, Literal
@@ -28,29 +28,28 @@ from src.core.element_converter import ElementConverter
 
 
 # =============================================================================
-# TOON Output Helpers
+# Output Helpers
 # =============================================================================
 
 
-def _format_structure(elem, current_depth: int, max_depth: int, lines: list[str]) -> None:
-    """Append indented TOON lines for element hierarchy."""
-    indent = "  " * current_depth
-    etype = elem.getType() or "element"
-    lines.append(f"{indent}{elem.getPath()} [{etype}] {elem.name}")
-
+def _format_structure(elem, current_depth: int, max_depth: int) -> dict:
+    """Build a dict for element hierarchy."""
+    result = {
+        "path": elem.getPath(),
+        "type": elem.getType() or "element",
+        "name": elem.name,
+    }
     if current_depth < max_depth and elem.children:
-        for child in elem.children:
-            _format_structure(child, current_depth + 1, max_depth, lines)
+        result["children"] = [
+            _format_structure(child, current_depth + 1, max_depth)
+            for child in elem.children
+        ]
+    return result
 
 
-def _collect_deps(element, base_path: str, direction: str, result_level, include_descendants: bool) -> list[str]:
-    """Collect dependency lines for an element, optionally including descendants.
-
-    For outgoing: "-> /target (type)" or "RelativeChild -> /target (type)"
-    For incoming: "/source (type) ->" or "/source (type) -> RelativeChild"
-    Relative paths (no leading /) identify which descendant has the dependency.
-    """
-    lines = []
+def _collect_deps(element, base_path: str, direction: str, result_level, include_descendants: bool) -> list[dict]:
+    """Collect dependency dicts for an element, optionally including descendants."""
+    deps = []
     seen = set()
 
     def aggregate(path: str) -> str:
@@ -60,12 +59,8 @@ def _collect_deps(element, base_path: str, direction: str, result_level, include
         return "/".join(parts[:result_level + 1]) if len(parts) > result_level else path
 
     def collect_for_element(elem):
-        # Compute relative path from base element (empty string for self)
         elem_path = elem.getPath()
-        if elem_path == base_path:
-            relative = ""
-        else:
-            relative = elem_path[len(base_path) + 1:]  # strip base_path + "/"
+        relative = "" if elem_path == base_path else elem_path[len(base_path) + 1:]
 
         if direction in ("outgoing", "both"):
             for assoc in elem.outgoing:
@@ -74,11 +69,12 @@ def _collect_deps(element, base_path: str, direction: str, result_level, include
                 key = ("out", relative, target, dep_type)
                 if key not in seen:
                     seen.add(key)
-                    type_suffix = f" ({dep_type})" if dep_type else ""
+                    entry = {"direction": "outgoing", "target": target}
+                    if dep_type:
+                        entry["type"] = dep_type
                     if relative:
-                        lines.append(f"{relative} -> {target}{type_suffix}")
-                    else:
-                        lines.append(f"-> {target}{type_suffix}")
+                        entry["from_descendant"] = relative
+                    deps.append(entry)
 
         if direction in ("incoming", "both"):
             for assoc in elem.incoming:
@@ -87,18 +83,19 @@ def _collect_deps(element, base_path: str, direction: str, result_level, include
                 key = ("in", source, relative, dep_type)
                 if key not in seen:
                     seen.add(key)
-                    type_suffix = f" ({dep_type})" if dep_type else ""
+                    entry = {"direction": "incoming", "source": source}
+                    if dep_type:
+                        entry["type"] = dep_type
                     if relative:
-                        lines.append(f"{source}{type_suffix} -> {relative}")
-                    else:
-                        lines.append(f"{source}{type_suffix} ->")
+                        entry["to_descendant"] = relative
+                    deps.append(entry)
 
         if include_descendants:
             for child in elem.children:
                 collect_for_element(child)
 
     collect_for_element(element)
-    return lines
+    return deps
 
 
 def _get_parent_dir(path: str) -> str:
@@ -304,7 +301,7 @@ class ClaudeCodeProfile:
     """Profile optimized for Claude Code IDE integration."""
 
     name = "claude-code"
-    description = "Optimized for Claude Code - plain text TOON output"
+    description = "Optimized for Claude Code - JSON output"
 
     def register_tools(self, mcp: FastMCP) -> None:
         """Register Claude Code-optimized tools with the MCP server."""
@@ -326,8 +323,7 @@ class ClaudeCodeProfile:
             - element_types: Filter by ["class", "function", "method", "file", "dir"]
             - model_id: Omit to use auto-loaded model
 
-            Returns plain text, one element per line: /path/to/element [type] name
-            First line shows match count: "N/M matches" (shown/total).
+            Returns JSON with match count and element list.
             """
             mid = input.model_id or model_manager.default_model_id
             if not mid:
@@ -347,14 +343,16 @@ class ClaudeCodeProfile:
                 )
 
                 limited = elements[:input.max_results]
-                lines = [f"{len(limited)}/{len(elements)} matches"]
-                for e in limited:
-                    etype = e.getType() or "element"
-                    lines.append(f"{e.getPath()} [{etype}] {e.name}")
-
-                return "\n".join(lines)
+                return {
+                    "shown": len(limited),
+                    "total": len(elements),
+                    "elements": [
+                        {"path": e.getPath(), "type": e.getType() or "element", "name": e.name}
+                        for e in limited
+                    ],
+                }
             except Exception as e:
-                return f"error: Search failed: {e}"
+                return {"error": f"Search failed: {e}"}
 
         @mcp.tool()
         async def sgraph_get_element_dependencies(input: GetElementDependenciesInput):
@@ -381,7 +379,7 @@ class ClaudeCodeProfile:
             - true: Also include children's dependencies. Relative paths (no leading /)
               show which descendant: "MyClass/Save -> /target (call)"
 
-            Returns plain text. Outgoing: "-> /target (type)". Incoming: "/source (type) ->".
+            Returns JSON with outgoing/incoming dependency lists.
             """
             mid = input.model_id or model_manager.default_model_id
             if not mid:
@@ -395,27 +393,25 @@ class ClaudeCodeProfile:
                 return {"error": f"Element not found: {input.element_path}"}
 
             try:
-                sections = []
+                result = {}
 
                 if input.direction in ("outgoing", "both"):
-                    out_lines = _collect_deps(
+                    out_deps = _collect_deps(
                         element, input.element_path, "outgoing",
                         input.result_level, input.include_descendants,
                     )
-                    sections.append(f"outgoing ({len(out_lines)}):")
-                    sections.extend(out_lines) if out_lines else sections.append("  (none)")
+                    result["outgoing"] = out_deps
 
                 if input.direction in ("incoming", "both"):
-                    in_lines = _collect_deps(
+                    in_deps = _collect_deps(
                         element, input.element_path, "incoming",
                         input.result_level, input.include_descendants,
                     )
-                    sections.append(f"incoming ({len(in_lines)}):")
-                    sections.extend(in_lines) if in_lines else sections.append("  (none)")
+                    result["incoming"] = in_deps
 
-                return "\n".join(sections)
+                return result
             except Exception as e:
-                return f"error: Dependency query failed: {e}"
+                return {"error": f"Dependency query failed: {e}"}
 
         @mcp.tool()
         async def sgraph_get_element_structure(input: GetElementStructureInput):
@@ -431,8 +427,7 @@ class ClaudeCodeProfile:
             - 2: Two levels (file->classes->methods) - usually sufficient
             - 3+: Deeper nesting (rarely needed)
 
-            Returns plain text with indented hierarchy.
-            Each line: /path/to/element [type] name
+            Returns JSON hierarchy with path, type, name, and children.
             Much cheaper than Read - use this first to decide what to read.
             """
             mid = input.model_id or model_manager.default_model_id
@@ -447,11 +442,9 @@ class ClaudeCodeProfile:
                 return {"error": f"Element not found: {input.element_path}"}
 
             try:
-                lines = []
-                _format_structure(element, 0, input.max_depth, lines)
-                return "\n".join(lines)
+                return _format_structure(element, 0, input.max_depth)
             except Exception as e:
-                return f"error: Structure query failed: {e}"
+                return {"error": f"Structure query failed: {e}"}
 
         @mcp.tool()
         async def sgraph_analyze_change_impact(input: AnalyzeChangeImpactInput):
@@ -472,7 +465,7 @@ class ClaudeCodeProfile:
             - Before deleting code -> verify nothing depends on it
             - Planning large refactoring -> understand blast radius
 
-            Returns plain text with sections for each aggregation level.
+            Returns JSON with summary, warnings, and callers at multiple aggregation levels.
             """
             mid = input.model_id or model_manager.default_model_id
             if not mid:
@@ -487,7 +480,6 @@ class ClaudeCodeProfile:
 
             try:
                 # Collect all elements in subtree (element + children, recursive)
-                # This ensures file-level analysis captures deps on classes/functions inside
                 subtree = []
                 stack = [element]
                 while stack:
@@ -534,42 +526,35 @@ class ClaudeCodeProfile:
                 outgoing_dirs.discard(element_dir)
                 cycle_dirs = incoming_dirs & outgoing_dirs
 
-                # Build output
-                sections = [
-                    f"impact: {len(detailed)} callers, {len(files)} files, {len(modules)} modules",
-                ]
+                # Build result
+                result = {
+                    "summary": {
+                        "callers": len(detailed),
+                        "files": len(files),
+                        "modules": len(modules),
+                    },
+                    "warnings": [],
+                    "detailed": detailed,
+                    "by_file": sorted(files),
+                    "by_module": sorted(modules),
+                }
 
-                # Warnings
                 if cycle_dirs:
-                    sections.append("")
-                    sections.append(
-                        f"WARNING dependency_cycle: bidirectional deps with "
-                        f"{len(cycle_dirs)} module(s) — blast radius likely exceeds listed callers"
-                    )
-                    for d in sorted(cycle_dirs):
-                        sections.append(f"  <-> {d}")
+                    result["warnings"].append({
+                        "type": "dependency_cycle",
+                        "message": f"Bidirectional deps with {len(cycle_dirs)} module(s) — blast radius likely exceeds listed callers",
+                        "modules": sorted(cycle_dirs),
+                    })
 
-                # Hub threshold: 30 outgoing non-external deps indicates high coupling
                 if outgoing_count_non_external > 30:
-                    sections.append("")
-                    sections.append(
-                        f"WARNING hub_element: {outgoing_count_non_external} outgoing "
-                        f"deps — changes here cascade widely"
-                    )
+                    result["warnings"].append({
+                        "type": "hub_element",
+                        "message": f"{outgoing_count_non_external} outgoing deps — changes here cascade widely",
+                    })
 
-                sections.append("")
-                sections.append(f"detailed ({len(detailed)}):")
-                sections.extend(detailed) if detailed else sections.append("  (none)")
-                sections.append("")
-                sections.append(f"by_file ({len(files)}):")
-                sections.extend(sorted(files)) if files else sections.append("  (none)")
-                sections.append("")
-                sections.append(f"by_module ({len(modules)}):")
-                sections.extend(sorted(modules)) if modules else sections.append("  (none)")
-
-                return "\n".join(sections)
+                return result
             except Exception as e:
-                return f"error: Impact analysis failed: {e}"
+                return {"error": f"Impact analysis failed: {e}"}
 
         @mcp.tool()
         async def sgraph_audit(input: AuditInput):
@@ -584,7 +569,7 @@ class ClaudeCodeProfile:
             - 3: /project/component/module (default)
             - 4+: deeper nesting for fine-grained analysis
 
-            Returns plain text with cycles, hub modules, and summary metrics.
+            Returns JSON with cycles, hub modules, and summary metrics.
             """
             mid = input.model_id or model_manager.default_model_id
             if not mid:
@@ -603,62 +588,51 @@ class ClaudeCodeProfile:
                 )
 
                 if "error" in analysis:
-                    return f"error: {analysis['error']}"
+                    return {"error": analysis["error"]}
 
-                sections = [
-                    f"audit: {analysis.get('total_modules', 0)} modules, "
-                    f"{analysis.get('total_dependencies', 0)} dependencies",
-                ]
+                result = {
+                    "total_modules": analysis.get("total_modules", 0),
+                    "total_dependencies": analysis.get("total_dependencies", 0),
+                }
 
                 if "cycles" in input.checks:
-                    cycles = analysis.get("metrics", {}).get(
+                    raw_cycles = analysis.get("metrics", {}).get(
                         "circular_dependencies", []
                     )
-                    sections.append("")
-                    sections.append(f"cycles ({len(cycles)}):")
-                    if cycles:
-                        for c in cycles:
-                            sections.append(
-                                f"  {c['module1']} <-> {c['module2']} "
-                                f"({c['count_1_to_2']}→, {c['count_2_to_1']}←)"
-                            )
-                    else:
-                        sections.append("  (none)")
+                    result["cycles"] = [
+                        {
+                            "module1": c["module1"],
+                            "module2": c["module2"],
+                            "forward": c["count_1_to_2"],
+                            "backward": c["count_2_to_1"],
+                        }
+                        for c in raw_cycles
+                    ]
 
                 if "hubs" in input.checks:
                     modules = analysis.get("modules", [])
                     hub_threshold = 5
-                    outgoing_hubs = sorted(
-                        [m for m in modules if m["outgoing_count"] >= hub_threshold],
-                        key=lambda x: x["outgoing_count"],
+                    result["most_dependent"] = sorted(
+                        [
+                            {"path": m["path"], "outgoing": m["outgoing_count"]}
+                            for m in modules if m["outgoing_count"] >= hub_threshold
+                        ],
+                        key=lambda x: x["outgoing"],
                         reverse=True,
                     )[:10]
-                    incoming_hubs = sorted(
-                        [m for m in modules if m["incoming_count"] >= hub_threshold],
-                        key=lambda x: x["incoming_count"],
+                    result["most_depended_upon"] = sorted(
+                        [
+                            {"path": m["path"], "incoming": m["incoming_count"]}
+                            for m in modules if m["incoming_count"] >= hub_threshold
+                        ],
+                        key=lambda x: x["incoming"],
                         reverse=True,
                     )[:10]
 
-                    sections.append("")
-                    sections.append("most_dependent:")
-                    if outgoing_hubs:
-                        for m in outgoing_hubs:
-                            sections.append(f"  {m['path']} ({m['outgoing_count']} outgoing)")
-                    else:
-                        sections.append("  (none)")
-
-                    sections.append("")
-                    sections.append("most_depended_upon:")
-                    if incoming_hubs:
-                        for m in incoming_hubs:
-                            sections.append(f"  {m['path']} ({m['incoming_count']} incoming)")
-                    else:
-                        sections.append("  (none)")
-
-                return "\n".join(sections)
+                return result
 
             except Exception as e:
-                return f"error: Audit failed: {e}"
+                return {"error": f"Audit failed: {e}"}
 
         @mcp.tool()
         async def sgraph_resolve_local_path(input: ResolveLocalPathInput):
