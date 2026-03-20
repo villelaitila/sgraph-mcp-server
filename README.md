@@ -177,24 +177,38 @@ uv run python -m src.server
 # Claude Code optimized (7 tools, JSON output)
 uv run python -m src.server --profile claude-code
 
+# With auto-loaded model and default scope
+uv run python -m src.server --profile claude-code \
+  --auto-load /path/to/model.xml.zip \
+  --default-scope /Project/repo
+
 # Explicit legacy
 uv run python -m src.server --profile legacy
 ```
 
 ### MCP client configuration
 
+**Recommended: stdio transport** (Claude Code manages the process lifecycle):
+
 ```json
 {
   "mcpServers": {
-    "sgraph-mcp": {
-      "command": "npx",
-      "args": ["-y", "mcp-remote", "http://localhost:8008/sse"]
+    "sgraph": {
+      "command": "uv",
+      "args": ["run", "--directory", "/path/to/sgraph-mcp-server",
+               "python", "-m", "src.server", "--profile", "claude-code", "--transport", "stdio"]
     }
   }
 }
 ```
 
-For Claude Code or Cursor, you can also use a `.mcp.json` file in your project root:
+Place in `~/.mcp.json` for global availability or `.mcp.json` in a project root.
+
+**Alternative: SSE transport** (run server separately, connect via proxy):
+
+```bash
+uv run python -m src.server --profile claude-code  # starts on port 8008
+```
 
 ```json
 {

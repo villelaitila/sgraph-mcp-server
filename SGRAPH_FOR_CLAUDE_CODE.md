@@ -13,27 +13,20 @@ SGraph provides **pre-computed dependency graphs** that answer architectural que
 
 ## Quick Start
 
-```bash
-# Start the server with Claude Code profile (5 optimized tools)
-uv run python -m src.server --profile claude-code
-
-# With auto-loaded model and default scope
-uv run python -m src.server --profile claude-code \
-  --auto-load /path/to/model.xml.zip \
-  --default-scope /Project/repo
-```
-
-Add to Claude Code's MCP config (`.mcp.json` in project root):
+Add to `~/.mcp.json` (global) or `.mcp.json` (project root):
 ```json
 {
   "mcpServers": {
     "sgraph": {
-      "command": "npx",
-      "args": ["-y", "mcp-remote", "http://localhost:8008/sse"]
+      "command": "uv",
+      "args": ["run", "--directory", "/path/to/sgraph-mcp-server",
+               "python", "-m", "src.server", "--profile", "claude-code", "--transport", "stdio"]
     }
   }
 }
 ```
+
+Claude Code manages the server process automatically via stdio.
 
 ## The 7 Tools
 
