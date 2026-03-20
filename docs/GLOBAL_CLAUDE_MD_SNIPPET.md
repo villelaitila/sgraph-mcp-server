@@ -27,7 +27,7 @@ You have access to **sgraph** - pre-computed dependency graphs that answer archi
 |------|----------|
 | **Model path** | `/tmp/analysis-outputs/<project-name>/latest.xml.zip` |
 | **Analyzer** | `~/analyze.sh <source-dir> --output-dir /tmp/analysis-outputs/<project-name>` |
-| **MCP server** | `http://localhost:8008/sse` (claude-code profile) |
+| **MCP server** | stdio transport via `~/.mcp.json` (claude-code profile) |
 | **File watcher** | `sgraph-watcher` (auto-reanalyzes on code changes) |
 
 ### Quick Check: Is a Model Available?
