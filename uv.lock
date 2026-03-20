@@ -697,15 +697,15 @@ wheels = [
 
 [[package]]
 name = "sgraph"
-version = "1.1.1"
+version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "lxml" },
     { name = "pandas" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3c/67/abd0a6d93a81cfc03888ccff4222eec731446d017a6e54e6ab48b6b5ef3a/sgraph-1.1.1.tar.gz", hash = "sha256:eee9734a3b68228602e480a8661000b3793609ace752802e9d378394a97c3c61", size = 60624 }
+sdist = { url = "https://files.pythonhosted.org/packages/b9/2c/5aaec7ac5ba226622118a40cb87417335a9a0b71bda868d9cc52e539c439/sgraph-1.4.0.tar.gz", hash = "sha256:e23238713b193c36827589a7bfa4e8edfbd2c2e2f0bf27a4cf0e45e2f9846d4d", size = 84245 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fa/ed/5ea8f7a555a29c4cbded59bff74fd2b77f1d545677ba23c2b73eb81d1684/sgraph-1.1.1-py3-none-any.whl", hash = "sha256:c36eeb1485fbbfc581d01f05cbca09907f2581d5120677d30fe9157360991b33", size = 71833 },
+    { url = "https://files.pythonhosted.org/packages/a6/c0/203ce5bedb488254045721e904e75fc1cf03aac05278e3f3a4e2e2080989/sgraph-1.4.0-py3-none-any.whl", hash = "sha256:35493fe4e6756b082b466b40bc8970cabfb03634a6ac778d4a2417fa235608fb", size = 97660 },
 ]
 
 [[package]]
@@ -732,7 +732,7 @@ requires-dist = [
     { name = "mcp", extras = ["cli"], specifier = ">=1.9.0" },
     { name = "nanoid", specifier = ">=2.0.0" },
     { name = "pydantic", specifier = ">=2.11.4" },
-    { name = "sgraph", specifier = ">=1.1.1" },
+    { name = "sgraph", specifier = ">=1.4.0" },
 ]
 
 [package.metadata.dependency-groups]
