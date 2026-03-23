@@ -30,6 +30,7 @@ The sgraph-mcp-server uses a **modular architecture** designed for maintainabili
    - **SearchService** - Search algorithms (by name, type, attributes)
    - **DependencyService** - Dependency analysis and subtree operations
    - **OverviewService** - Model structure overview generation
+   - **SecurityService** - Security audit across 6 dimensions (secrets, vulns, EOL, risk, backstage, bus factor)
 
 3. **Tools Layer** (`src/tools/`)
    - **ModelTools** - Model loading and overview MCP tools
@@ -43,27 +44,7 @@ The sgraph-mcp-server uses a **modular architecture** designed for maintainabili
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed design documentation.
 
-### MCP Tools by Profile
-
-#### Claude Code Profile (7 tools, JSON output)
-
-| Tool | Purpose |
-|------|---------|
-| `sgraph_load_model` | Load and cache a model |
-| `sgraph_search_elements` | Find elements by name pattern |
-| `sgraph_get_element_dependencies` | Query incoming/outgoing deps |
-| `sgraph_get_element_structure` | Explore hierarchy without reading source |
-| `sgraph_analyze_change_impact` | Impact analysis with warnings |
-| `sgraph_audit` | Architectural health checks |
-
-Key features:
-- **`include_descendants`** on dependencies: shows which child element owns each dependency using relative paths (no leading `/`)
-- **`result_level`** aggregation: same data at function/file/directory/repository granularity
-- **`scope_path`** filtering: limit searches to subtrees, with configurable default scope
-
-See [SGRAPH_FOR_CLAUDE_CODE.md](SGRAPH_FOR_CLAUDE_CODE.md) for full tool reference, output examples, and workflows.
-
-#### Legacy Profile (14 tools, JSON output)
+### Current MCP Tools
 
 **Basic Operations:**
 - `sgraph_load_model` - Load and cache an sgraph model from file
@@ -83,6 +64,69 @@ See [SGRAPH_FOR_CLAUDE_CODE.md](SGRAPH_FOR_CLAUDE_CODE.md) for full tool referen
 - `sgraph_get_multiple_elements` - Efficiently retrieve multiple elements in a single request
 - `sgraph_get_model_overview` - Get hierarchical overview of model structure with configurable depth
 - `sgraph_get_high_level_dependencies` - Get module-level dependencies aggregated at directory level with metrics
+
+#### Search Examples
+
+```python
+# Find all functions containing "test" in their name
+sgraph_search_elements_by_name(model_id="abc123", pattern=".*test.*", element_type="function")
+
+# Get all classes in a specific directory
+sgraph_get_elements_by_type(model_id="abc123", element_type="class", scope_path="/project/src/models")
+
+# Find elements with specific attributes
+sgraph_search_elements_by_attributes(
+    model_id="abc123", 
+    attribute_filters={"visibility": "public", "complexity": "high"}
+)
+```
+
+#### Bulk Analysis Examples
+
+```python
+# Analyze dependencies within a module subtree
+sgraph_get_subtree_dependencies(
+    model_id="abc123", 
+    root_path="/project/src/auth",
+    include_external=True,
+    max_depth=3
+)
+
+# Get transitive dependency chain from an element
+sgraph_get_dependency_chain(
+    model_id="abc123",
+    element_path="/project/src/auth/login.py/LoginHandler",
+    direction="outgoing",
+    max_depth=2
+)
+
+# Efficiently retrieve multiple elements
+sgraph_get_multiple_elements(
+    model_id="abc123",
+    element_paths=[
+        "/project/src/auth/login.py/LoginHandler",
+        "/project/src/auth/session.py/SessionManager",
+        "/project/src/database/user.py/User"
+    ]
+)
+
+# Get hierarchical overview of the model structure
+sgraph_get_model_overview(
+    model_id="abc123",
+    max_depth=3,
+    include_counts=True
+)
+
+# Get high-level module dependencies with metrics
+sgraph_get_high_level_dependencies(
+    model_id="abc123",
+    scope_path="/project/src",  # Optional: limit to src directory
+    aggregation_level=2,        # Aggregate at /project/module level
+    min_dependency_count=3,     # Only show dependencies with 3+ connections
+    include_external=True,      # Include external dependencies
+    include_metrics=True        # Calculate coupling metrics and hotspots
+)
+```
 
 ## SGraph Data Structure
 
@@ -163,10 +207,10 @@ Performance tests use real models to verify operations complete within acceptabl
 
 The server supports multiple profiles optimized for different use cases:
 
-| Profile | Tools | Output | Use Case |
-|---------|-------|--------|----------|
-| `legacy` | 14 | JSON | Full tool set (backwards compatible, default) |
-| `claude-code` | 7 | JSON | AI-assisted development (optimized for LLMs) |
+| Profile | Tools | Use Case |
+|---------|-------|----------|
+| `legacy` | 14 | Full tool set (backwards compatible, default) |
+| `claude-code` | 6 | AI-assisted software development (optimized for Claude Code) |
 
 ### Run the server
 
@@ -174,13 +218,8 @@ The server supports multiple profiles optimized for different use cases:
 # Default (legacy profile with all 14 tools)
 uv run python -m src.server
 
-# Claude Code optimized (7 tools, JSON output)
+# Claude Code optimized (6 consolidated tools, 60% fewer tokens)
 uv run python -m src.server --profile claude-code
-
-# With auto-loaded model and default scope
-uv run python -m src.server --profile claude-code \
-  --auto-load /path/to/model.xml.zip \
-  --default-scope /Project/repo
 
 # Explicit legacy
 uv run python -m src.server --profile legacy
@@ -188,27 +227,18 @@ uv run python -m src.server --profile legacy
 
 ### MCP client configuration
 
-**Recommended: stdio transport** (Claude Code manages the process lifecycle):
-
 ```json
 {
   "mcpServers": {
-    "sgraph": {
-      "command": "uv",
-      "args": ["run", "--directory", "/path/to/sgraph-mcp-server",
-               "python", "-m", "src.server", "--profile", "claude-code", "--transport", "stdio"]
+    "sgraph-mcp": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://localhost:8008/sse"]
     }
   }
 }
 ```
 
-Place in `~/.mcp.json` for global availability or `.mcp.json` in a project root.
-
-**Alternative: SSE transport** (run server separately, connect via proxy):
-
-```bash
-uv run python -m src.server --profile claude-code  # starts on port 8008
-```
+For Claude Code or Cursor, you can also use a `.mcp.json` file in your project root:
 
 ```json
 {
@@ -223,7 +253,8 @@ uv run python -m src.server --profile claude-code  # starts on port 8008
 
 ### Profile Documentation
 
-- **Claude Code**: See [SGRAPH_FOR_CLAUDE_CODE.md](SGRAPH_FOR_CLAUDE_CODE.md) for tool reference, output examples, and workflows
+- **Claude Code**: See [SGRAPH_FOR_CLAUDE_CODE.md](SGRAPH_FOR_CLAUDE_CODE.md) for tool reference and workflows
+- **Genealogy**: See [SGRAPH_FOR_GENEALOGY.md](SGRAPH_FOR_GENEALOGY.md) for family tree navigation guide
 
 ## About SGraph
 

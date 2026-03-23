@@ -66,7 +66,7 @@ Examples:
         "--default-scope",
         type=str,
         default=None,
-        help="Default scope path for searches (e.g., '/TalenomSoftware/Online/talenom.online.invoicepayment5.api')",
+        help="Default scope path for searches (e.g., '/Organization/Platform/my-service')",
     )
     return parser.parse_args()
 

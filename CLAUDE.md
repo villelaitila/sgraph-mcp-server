@@ -16,8 +16,12 @@ uv sync
 uv run python -m src.server
 
 # Run with specific profile
-uv run python -m src.server --profile claude-code  # 7 optimized tools
+uv run python -m src.server --profile claude-code  # 8 optimized tools
 uv run python -m src.server --profile legacy       # 14 tools (default)
+
+# Run security audit CLI
+uv run python -m src.tools.security_report_cli /path/to/model.xml.zip
+uv run python -m src.tools.security_report_cli /path/to/model.xml.zip -o report.md --top-n 20
 
 # Run all tests
 uv run python tests/run_all_tests.py
@@ -43,7 +47,7 @@ MCP Client Request
        ↓
 [Tools Layer] src/tools/        → MCP tool definitions, input validation
        ↓
-[Services Layer] src/services/  → Business logic (search, dependencies, overview)
+[Services Layer] src/services/  → Business logic (search, dependencies, overview, security audit)
        ↓
 [Core Layer] src/core/          → Model management, data conversion
        ↓
@@ -92,7 +96,7 @@ The server supports multiple profiles in `src/profiles/`:
 | Profile | Tools | Description |
 |---------|-------|-------------|
 | `legacy` | 14 | Full original tool set (default, backwards compatible) |
-| `claude-code` | 7 | Optimized for Claude Code - JSON output, `include_descendants` support |
+| `claude-code` | 6 | Optimized for Claude Code - consolidated tools, TOON output format |
 
 **Claude Code profile tools** (see `SGRAPH_FOR_CLAUDE_CODE.md`):
 - `sgraph_search_elements` - Find symbols by pattern
