@@ -1,245 +1,81 @@
 # SGraph MCP Server
 
-An MCP (Model Context Protocol) server that provides AI agents with efficient access to software structure and dependency information through cached [sgraph](https://github.com/softagram/sgraph) models.
+[![Python 3.13+](https://img.shields.io/badge/Python-3.13%2B-blue)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![CI](https://github.com/softagram/sgraph-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/softagram/sgraph-mcp-server/actions/workflows/ci.yml)
 
-## Overview
+An [MCP](https://modelcontextprotocol.io/) server that gives AI agents instant access to software architecture, dependencies, and impact analysis through pre-computed [sgraph](https://github.com/softagram/sgraph) models. One tool call replaces dozens of grep/read cycles.
 
-Traditional AI agents make dozens or hundreds of tool calls when analyzing codebases, especially for large projects with complex syntax. This server addresses that performance bottleneck by pre-loading sgraph models into memory and providing fast, structured access to software elements and their interdependencies.
+## Why?
 
-![alt text](doc/real_world_validation_in_cursor_ide.png "Real World Validation")
+AI agents discover code structure by reading files one at a time. For a question like *"what calls this function?"*, that means grep, read, grep again, read again... Dozens of round-trips, thousands of tokens, and results that still miss indirect callers.
 
-### Key Benefits for AI Agents
+SGraph pre-computes the full dependency graph. The same question takes **one call** and returns **every caller** with type information.
 
-- **Performance Optimization**: Reduces query time from seconds to milliseconds
-- **Hierarchical Understanding**: Path-based structure (`/Project/dir/file/element`) provides context awareness
-- **Dependency Analysis**: Complete incoming/outgoing association mapping
-- **Scope Management**: Easy filtering by directory, file, or element level
-- **External Dependencies**: Special handling for third-party packages under `/ProjectName/External`
+| | Traditional (grep/read) | SGraph MCP |
+|---|---|---|
+| "What calls this function?" | Multiple grep + read cycles | `sgraph_get_element_dependencies` |
+| "What breaks if I change this?" | Manual trace, easy to miss | `sgraph_analyze_change_impact` |
+| "Show module structure" | ls + read + scroll | `sgraph_get_element_structure` |
+| Time per query | Seconds (many round-trips) | Milliseconds (cached) |
+| Accuracy | Text matching (noisy) | Semantic graph (precise) |
 
-## Architecture
+## Quick Start
 
-The sgraph-mcp-server uses a **modular architecture** designed for maintainability, testability, and extensibility:
-
-### Components
-
-1. **Core Layer** (`src/core/`)
-   - **ModelManager** - Model loading, caching, and lifecycle management  
-   - **ElementConverter** - SElement to dictionary conversion utilities
-
-2. **Service Layer** (`src/services/`)
-   - **SearchService** - Search algorithms (by name, type, attributes)
-   - **DependencyService** - Dependency analysis and subtree operations
-   - **OverviewService** - Model structure overview generation
-   - **SecurityService** - Security audit across 6 dimensions (secrets, vulns, EOL, risk, backstage, bus factor)
-
-3. **Tools Layer** (`src/tools/`)
-   - **ModelTools** - Model loading and overview MCP tools
-   - **SearchTools** - Search-related MCP tools  
-   - **AnalysisTools** - Dependency analysis MCP tools
-   - **NavigationTools** - Element navigation MCP tools
-
-4. **Utils Layer** (`src/utils/`)
-   - **Logging** - Centralized logging configuration
-   - **Validators** - Input validation and security checks
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed design documentation.
-
-### Current MCP Tools
-
-**Basic Operations:**
-- `sgraph_load_model` - Load and cache an sgraph model from file
-- `sgraph_get_root_element` - Get the root element of a model
-- `sgraph_get_element` - Get a specific element by path
-- `sgraph_get_element_incoming_associations` - Get incoming dependencies
-- `sgraph_get_element_outgoing_associations` - Get outgoing dependencies
-
-**Search and Discovery:**
-- `sgraph_search_elements_by_name` - Search elements by name pattern (regex/glob) with optional type and scope filters
-- `sgraph_get_elements_by_type` - Get all elements of a specific type within optional scope
-- `sgraph_search_elements_by_attributes` - Search elements by attribute values with optional scope
-
-**Bulk Analysis:**
-- `sgraph_get_subtree_dependencies` - Analyze all dependencies within a subtree (internal, incoming, outgoing)
-- `sgraph_get_dependency_chain` - Get transitive dependency chains with configurable direction and depth
-- `sgraph_get_multiple_elements` - Efficiently retrieve multiple elements in a single request
-- `sgraph_get_model_overview` - Get hierarchical overview of model structure with configurable depth
-- `sgraph_get_high_level_dependencies` - Get module-level dependencies aggregated at directory level with metrics
-
-#### Search Examples
-
-```python
-# Find all functions containing "test" in their name
-sgraph_search_elements_by_name(model_id="abc123", pattern=".*test.*", element_type="function")
-
-# Get all classes in a specific directory
-sgraph_get_elements_by_type(model_id="abc123", element_type="class", scope_path="/project/src/models")
-
-# Find elements with specific attributes
-sgraph_search_elements_by_attributes(
-    model_id="abc123", 
-    attribute_filters={"visibility": "public", "complexity": "high"}
-)
-```
-
-#### Bulk Analysis Examples
-
-```python
-# Analyze dependencies within a module subtree
-sgraph_get_subtree_dependencies(
-    model_id="abc123", 
-    root_path="/project/src/auth",
-    include_external=True,
-    max_depth=3
-)
-
-# Get transitive dependency chain from an element
-sgraph_get_dependency_chain(
-    model_id="abc123",
-    element_path="/project/src/auth/login.py/LoginHandler",
-    direction="outgoing",
-    max_depth=2
-)
-
-# Efficiently retrieve multiple elements
-sgraph_get_multiple_elements(
-    model_id="abc123",
-    element_paths=[
-        "/project/src/auth/login.py/LoginHandler",
-        "/project/src/auth/session.py/SessionManager",
-        "/project/src/database/user.py/User"
-    ]
-)
-
-# Get hierarchical overview of the model structure
-sgraph_get_model_overview(
-    model_id="abc123",
-    max_depth=3,
-    include_counts=True
-)
-
-# Get high-level module dependencies with metrics
-sgraph_get_high_level_dependencies(
-    model_id="abc123",
-    scope_path="/project/src",  # Optional: limit to src directory
-    aggregation_level=2,        # Aggregate at /project/module level
-    min_dependency_count=3,     # Only show dependencies with 3+ connections
-    include_external=True,      # Include external dependencies
-    include_metrics=True        # Calculate coupling metrics and hotspots
-)
-```
-
-## SGraph Data Structure
-
-SGraph models represent software structures as hierarchical graphs where:
-
-- **Elements** form a hierarchy: `/Project/<directory>/<file>/<code_element>`
-- **Associations** are directed dependencies between elements
-- **Attributes** can be attached to both elements and associations
-- **External Dependencies** are represented under `/ProjectName/External`
-- **Performance** is optimized with integer-based referencing for models up to 10M+ elements
-
-### Use Cases Where This Excels
-
-1. **Code Understanding**: "Show me all classes that depend on this interface"
-2. **Refactoring Planning**: "What would break if I change this function signature?"
-3. **Architecture Analysis**: "Map the dependency flow from UI to database"
-4. **External Dependency Audit**: "List all third-party libraries used in authentication code"
-5. **Impact Assessment**: "Which tests need updating if I modify this module?"
-
-### Performance Comparison
-
-| Traditional Approach | SGraph MCP Server |
-|---------------------|-------------------|
-| Multiple grep/ast searches | Single cached query |
-| Text-based matching | Semantic structure |
-| No dependency context | Full dependency graph |
-| File-by-file analysis | Project-wide understanding |
-
-## How to Utilize
-
-1. **Generate Models**: Implement an analyzer/parser to produce sgraph model files from your data sources
-2. **Integration**: Integrate the flow of models into your device, e.g. pull models when they change
-3. **Configuration**: Configure sgraph-mcp-server to your agent, and spawn it up
-4. **Automation**: Write custom rules to let your agent know about this efficient tool
-
-## Installation
+### 1. Install
 
 ```bash
+git clone https://github.com/softagram/sgraph-mcp-server.git
+cd sgraph-mcp-server
 uv sync
 ```
 
-## Testing
-
-The project includes comprehensive tests organized by type:
-
-### Run All Tests
-```bash
-# Run all tests (unit, integration, performance)
-uv run python tests/run_all_tests.py
-
-# Run specific test types
-uv run python tests/run_all_tests.py unit
-uv run python tests/run_all_tests.py integration  
-uv run python tests/run_all_tests.py performance
-```
-
-### Test Structure
-- **Unit Tests** (`tests/unit/`) - Test individual components in isolation
-- **Integration Tests** (`tests/integration/`) - Test component interactions and workflows  
-- **Performance Tests** (`tests/performance/`) - Validate performance targets and regressions
-
-### Legacy Performance Tests
-The original performance tests verify that search operations meet performance requirements:
+### 2. Start the server
 
 ```bash
-# Run original performance test suite
-uv run python tests/performance/run_tests.py
-
-# Run specific legacy test
-uv run python tests/performance/test_search_performance.py
-```
-
-Performance tests use real models to verify operations complete within acceptable time limits (e.g., < 100ms for name searches).
-
-## Usage
-
-### Profiles
-
-The server supports multiple profiles optimized for different use cases:
-
-| Profile | Tools | Use Case |
-|---------|-------|----------|
-| `legacy` | 14 | Full tool set (backwards compatible, default) |
-| `claude-code` | 6 | AI-assisted software development (optimized for Claude Code) |
-
-### Run the server
-
-```bash
-# Default (legacy profile with all 14 tools)
-uv run python -m src.server
-
-# Claude Code optimized (6 consolidated tools, 60% fewer tokens)
+# With Claude Code profile (recommended)
 uv run python -m src.server --profile claude-code
 
-# Explicit legacy
-uv run python -m src.server --profile legacy
+# With auto-loaded model (skip the load_model step)
+uv run python -m src.server --profile claude-code \
+  --auto-load /path/to/model.xml.zip \
+  --default-scope /Project/src
 ```
 
-### MCP client configuration
+### 3. Connect your AI agent
 
+<details>
+<summary><strong>Claude Code / Cursor (.mcp.json)</strong></summary>
+
+Create `.mcp.json` in your project root:
 ```json
 {
   "mcpServers": {
-    "sgraph-mcp": {
-      "command": "npx",
-      "args": ["-y", "mcp-remote", "http://localhost:8008/sse"]
+    "sgraph": {
+      "command": "uv",
+      "args": [
+        "run", "--directory", "/path/to/sgraph-mcp-server",
+        "python", "-m", "src.server",
+        "--profile", "claude-code",
+        "--transport", "stdio",
+        "--auto-load", "/path/to/model.xml.zip"
+      ]
     }
   }
 }
 ```
 
-For Claude Code or Cursor, you can also use a `.mcp.json` file in your project root:
+</details>
 
+<details>
+<summary><strong>Any MCP client (SSE transport)</strong></summary>
+
+Start the server with SSE (default):
+```bash
+uv run python -m src.server --profile claude-code --port 8008
+```
+
+Then connect:
 ```json
 {
   "mcpServers": {
@@ -251,11 +87,122 @@ For Claude Code or Cursor, you can also use a `.mcp.json` file in your project r
 }
 ```
 
-### Profile Documentation
+</details>
 
-- **Claude Code**: See [SGRAPH_FOR_CLAUDE_CODE.md](SGRAPH_FOR_CLAUDE_CODE.md) for tool reference and workflows
-- **Genealogy**: See [SGRAPH_FOR_GENEALOGY.md](SGRAPH_FOR_GENEALOGY.md) for family tree navigation guide
+<details>
+<summary><strong>Where do sgraph models come from?</strong></summary>
 
-## About SGraph
+sgraph models (`.xml.zip` files) are produced by [Softagram](https://www.softagram.com/) code analysis or the open-source [sgraph CLI tools](https://github.com/softagram/sgraph).
 
-This server uses the [sgraph library](https://github.com/softagram/sgraph) from Softagram, which provides data formats, structures and algorithms for hierarchic graph structures. The library is particularly well-suited for representing software structures with its minimalist XML format and high-performance design.
+The models represent your codebase as a hierarchical graph:
+```
+/Project
+  /Project/src
+    /Project/src/auth/login.py
+      /Project/src/auth/login.py/LoginHandler        (class)
+        /Project/src/auth/login.py/LoginHandler/validate  (method)
+  /Project/External
+    /Project/External/Python/requests                 (third-party)
+```
+
+Each element can have **associations** (dependencies) to other elements, forming a complete dependency graph.
+
+</details>
+
+## Tools
+
+The **claude-code** profile provides 6 tools optimized for AI-assisted development:
+
+| Tool | What it does | When to use |
+|------|-------------|-------------|
+| `sgraph_search_elements` | Find symbols by pattern | "Where is the UserService class?" |
+| `sgraph_get_element_dependencies` | Query incoming/outgoing deps | "What calls this function?" |
+| `sgraph_get_element_structure` | Explore hierarchy | "What's inside this module?" |
+| `sgraph_analyze_change_impact` | Multi-level impact analysis | "What breaks if I change this?" |
+| `sgraph_audit` | Architectural health checks | "Any circular dependencies?" |
+| `sgraph_security_audit` | Security posture overview | "Any exposed secrets or CVEs?" |
+
+The key tool is **`sgraph_get_element_dependencies`** with its `result_level` parameter for controlling abstraction:
+
+```
+result_level=None  ->  /Project/src/auth/login.py/LoginHandler/validate  (raw)
+result_level=4     ->  /Project/src/auth/login.py                        (file)
+result_level=3     ->  /Project/src/auth                                 (directory)
+result_level=2     ->  /Project/src                                      (component)
+```
+
+For the full tool reference with workflows and examples, see **[SGRAPH_FOR_CLAUDE_CODE.md](SGRAPH_FOR_CLAUDE_CODE.md)**.
+
+<details>
+<summary><strong>Legacy profile (14 tools)</strong></summary>
+
+The `legacy` profile provides the full original tool set for backwards compatibility:
+
+**Basic Operations:**
+`sgraph_load_model`, `sgraph_get_root_element`, `sgraph_get_element`,
+`sgraph_get_element_incoming_associations`, `sgraph_get_element_outgoing_associations`
+
+**Search:** `sgraph_search_elements_by_name`, `sgraph_get_elements_by_type`,
+`sgraph_search_elements_by_attributes`
+
+**Analysis:** `sgraph_get_subtree_dependencies`, `sgraph_get_dependency_chain`,
+`sgraph_get_multiple_elements`, `sgraph_get_model_overview`,
+`sgraph_get_high_level_dependencies`
+
+```bash
+uv run python -m src.server --profile legacy
+```
+
+</details>
+
+## Example Conversation
+
+```
+You: "What would break if I rename the validate() method in auth/login.py?"
+
+Agent calls: sgraph_analyze_change_impact(element_path="/Project/src/auth/login.py/LoginHandler/validate")
+
+Result:
+  5 callers in 3 files
+  - /Project/src/api/routes.py (2 call sites)
+  - /Project/src/middleware/auth.py (2 call sites)
+  - /Project/tests/test_auth.py (1 call site)
+  Warning: bidirectional dependency with /Project/src/middleware
+```
+
+## Architecture
+
+```
+MCP Client Request
+       |
+[Tools Layer]     src/tools/        -- MCP tool definitions, input validation
+       |
+[Services Layer]  src/services/     -- Business logic (search, deps, security)
+       |
+[Core Layer]      src/core/         -- Model management, data conversion
+       |
+[SGraph Library]                    -- Graph operations (sgraph package)
+```
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the detailed design.
+
+## Development
+
+```bash
+# Run tests
+uv run python tests/run_all_tests.py
+uv run python tests/run_all_tests.py unit          # Unit only
+uv run python tests/run_all_tests.py integration   # Integration only
+
+# Lint
+uv run ruff check src/
+
+# Run a single test file
+uv run python -m pytest tests/unit/test_collect_deps.py -v
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to contribute.
+
+## About
+
+Built by [Softagram](https://www.softagram.com/) using the open-source [sgraph](https://github.com/softagram/sgraph) library. Licensed under [MIT](LICENSE).

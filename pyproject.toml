@@ -1,15 +1,45 @@
 [project]
 name = "sgraph-mcp"
 version = "0.1.0"
-description = "SGraph MCP Server"
+description = "MCP server giving AI agents fast access to software architecture, dependencies, and impact analysis via pre-computed sgraph models"
 readme = "README.md"
 requires-python = ">=3.13"
+license = {text = "MIT"}
+authors = [
+    {name = "Softagram", email = "info@softagram.com"},
+]
+keywords = [
+    "mcp",
+    "sgraph",
+    "code-analysis",
+    "dependencies",
+    "architecture",
+    "ai-agents",
+    "refactoring",
+    "impact-analysis",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
     "mcp[cli]>=1.9.0",
     "nanoid>=2.0.0",
     "pydantic>=2.11.4",
     "sgraph>=1.4.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/softagram/sgraph-mcp-server"
+Documentation = "https://softagram.github.io/sgraph-mcp-server/"
+Repository = "https://github.com/softagram/sgraph-mcp-server.git"
+"Bug Tracker" = "https://github.com/softagram/sgraph-mcp-server/issues"
 
 [project.scripts]
 sgraph-mcp-server = "src.server:main"
@@ -24,4 +54,8 @@ dev = [
     "mkdocs-material>=9.6.20",
     "pytest-asyncio>=1.2.0",
     "pytest>=8.4.2",
+    "ruff>=0.4.0",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
