@@ -11,6 +11,15 @@ wheels = [
 ]
 
 [[package]]
+name = "antlr4-python3-runtime"
+version = "4.12.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f5/4a/9335ed671e57bc8cc0a6ef7f17652b978f7098db56e29b9bea5eb7bf4a19/antlr4-python3-runtime-4.12.0.tar.gz", hash = "sha256:0a8b82f55032734f43ed6b60b8a48c25754721a75cd714eb1fe9ce6ed418b361", size = 117298 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2c/be/14afc05b4789239a9d597a7fdb64abe5d7babb3a28563dc96d9c53c880f7/antlr4_python3_runtime-4.12.0-py3-none-any.whl", hash = "sha256:2c08f4dfbdc7dfd10f680681a96a55579c1e4f866f01d27099c9a54027923d70", size = 144438 },
+]
+
+[[package]]
 name = "anyio"
 version = "4.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -393,6 +402,15 @@ wheels = [
 ]
 
 [[package]]
+name = "networkx"
+version = "3.6.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/6a/51/63fe664f3908c97be9d2e4f1158eb633317598cfa6e1fc14af5383f17512/networkx-3.6.1.tar.gz", hash = "sha256:26b7c357accc0c8cde558ad486283728b65b6a95d85ee1cd66bafab4c8168509", size = 2517025 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9e/c9/b2622292ea83fbb4ec318f5b9ab867d0a28ab43c5717bb85b0a5f6b3b0a4/networkx-3.6.1-py3-none-any.whl", hash = "sha256:d47fbf302e7d9cbbb9e2555a0d267983d2aa476bac30e90dfbe5669bd57f3762", size = 2068504 },
+]
+
+[[package]]
 name = "numpy"
 version = "2.2.5"
 source = { registry = "https://pypi.org/simple" }
@@ -742,6 +760,7 @@ dependencies = [
     { name = "nanoid" },
     { name = "pydantic" },
     { name = "sgraph" },
+    { name = "spycy-aneeshdurg" },
 ]
 
 [package.dependency-groups]
@@ -759,6 +778,7 @@ requires-dist = [
     { name = "nanoid", specifier = ">=2.0.0" },
     { name = "pydantic", specifier = ">=2.11.4" },
     { name = "sgraph", specifier = ">=1.4.0" },
+    { name = "spycy-aneeshdurg", specifier = ">=0.0.3" },
 ]
 
 [package.metadata.dependency-groups]
@@ -795,6 +815,21 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/a2/87/a6771e1546d97e7e041b6ae58d80074f81b7d5121207425c964ddf5cfdbd/sniffio-1.3.1.tar.gz", hash = "sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc", size = 20372 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl", hash = "sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2", size = 10235 },
+]
+
+[[package]]
+name = "spycy-aneeshdurg"
+version = "0.0.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "antlr4-python3-runtime" },
+    { name = "networkx" },
+    { name = "numpy" },
+    { name = "pandas" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/07/ce/f5d6f49dc8d177bf8dcd87f66949c8bf2180ab952c93704851460328d8ff/spycy_aneeshdurg-0.0.3.tar.gz", hash = "sha256:0d1d5fef876ce2150d0de9f3efb1cb9b50c93dce0fdcfa9675fe264806743e37", size = 20868690 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/be/21/92819ba37a75cd2d5a03a861df0822c8f943df32dbb4594703b1434448bd/spycy_aneeshdurg-0.0.3-py3-none-any.whl", hash = "sha256:2e220f9a210f6bc0512552f29bb929f11900693ebf3e18c088f374b9dcc94505", size = 134166 },
 ]
 
 [[package]]

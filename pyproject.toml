@@ -33,6 +33,7 @@ dependencies = [
     "nanoid>=2.0.0",
     "pydantic>=2.11.4",
     "sgraph>=1.4.0",
+    "spycy-aneeshdurg>=0.0.3",
 ]
 
 [project.urls]
