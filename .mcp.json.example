@@ -1,8 +1,14 @@
 {
   "mcpServers": {
     "sgraph": {
-      "command": "npx",
-      "args": ["-y", "mcp-remote", "http://localhost:8008/sse"]
+      "command": "uv",
+      "args": [
+        "run", "--directory", "/path/to/sgraph-mcp-server",
+        "python", "-m", "src.server",
+        "--profile", "claude-code",
+        "--transport", "stdio",
+        "--auto-load", "/path/to/model.xml.zip"
+      ]
     }
   }
 }
