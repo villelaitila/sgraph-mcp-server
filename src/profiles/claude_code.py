@@ -10,11 +10,13 @@ Tools:
 - sgraph_analyze_change_impact: Multi-level impact analysis (with cycle/hub warnings)
 - sgraph_audit: Architectural health checks (cycles, hubs) — for occasional reviews
 - sgraph_security_audit: Security overview (secrets, vulns, EOL, risk, backstage, bus factor)
+- sgraph_cypher_query: openCypher queries against the model (requires spycy)
+- sgraph_query: SGraph Query Language — architecture-native filtering and dependency queries
 
 Design principles:
 - Paths as first-class citizens (unambiguous element identification)
 - Abstraction as query parameter (result_level: function/file/module)
-- Progressive disclosure (8 tools vs 13+)
+- Progressive disclosure (10 tools vs 13+)
 - JSON output for reliable parsing by LLMs
 """
 
@@ -168,6 +170,13 @@ class GetElementDependenciesInput(BaseModel):
         default=True,
         description="Include external/third-party dependencies"
     )
+    target_filter: Optional[str] = Field(
+        default=None,
+        description=(
+            "Filter results by path prefix. Only deps whose target (outgoing) or source (incoming) "
+            "starts with this path are returned. Use to check 'does A depend on B?' efficiently."
+        )
+    )
 
 
 class GetElementStructureInput(BaseModel):
@@ -221,6 +230,36 @@ class SecurityAuditInput(BaseModel):
     top_n: int = Field(
         default=10,
         description="Maximum items in ranked lists (default 10)"
+    )
+
+
+class CypherQueryInput(BaseModel):
+    """Input for sgraph_cypher_query."""
+    model_id: Optional[str] = Field(default=None, description="Model ID (omit to use auto-loaded default)")
+    query: str = Field(description="openCypher query string (read-only, no CREATE/DELETE/SET)")
+    include_hierarchy: bool = Field(
+        default=False,
+        description=(
+            "Add :CONTAINS edges for parent-child hierarchy. "
+            "Doubles edge count — only enable if you need hierarchy traversal."
+        )
+    )
+    limit: int = Field(
+        default=100,
+        description="Max rows to return (safety limit to avoid huge outputs). Set higher if needed."
+    )
+
+
+class SGraphQueryInput(BaseModel):
+    """Input for sgraph_query."""
+    model_id: Optional[str] = Field(default=None, description="Model ID (omit to use auto-loaded default)")
+    expression: str = Field(
+        description=(
+            'SGraph Query Language expression. '
+            'Examples: \'"/src/web" --> "/src/db"\', '
+            '\'@type=file AND @loc>500\', '
+            '\'"/src" AND NOT "/src/External"\''
+        )
     )
 
 
@@ -384,6 +423,7 @@ class ClaudeCodeProfile:
             - Before modifying a function: check incoming (what calls this?)
             - Understanding a class: check outgoing (what does it use?)
             - Planning refactoring: check both directions
+            - Check module-level dependency: "does src/web depend on src/db?"
 
             Direction:
             - "incoming": What uses THIS element (callers, importers) - for impact analysis
@@ -401,6 +441,21 @@ class ClaudeCodeProfile:
             - true: Also include children's dependencies. Relative paths (no leading /)
               show which descendant: "MyClass/Save -> /target (call)"
 
+            target_filter:
+            - Optional path prefix to filter results. Only dependencies whose target (outgoing)
+              or source (incoming) starts with this prefix are returned.
+            - Example: target_filter="/project/src/db" with direction="outgoing" answers
+              "does this module depend on src/db?"
+
+            WARNING: include_descendants=true on large directories (e.g., src/) can return
+            thousands of results. Use target_filter or result_level=3 to keep output manageable.
+
+            Example - "Does src/web depend on src/db?":
+              element_path="/project/src/web", direction="outgoing",
+              include_descendants=true, result_level=3,
+              target_filter="/project/src/db"
+              -> Returns only dependencies from src/web subtree targeting src/db
+
             Returns JSON with outgoing/incoming dependency lists.
             """
             mid = input.model_id or model_manager.default_model_id
@@ -416,12 +471,15 @@ class ClaudeCodeProfile:
 
             try:
                 result = {}
+                tf = input.target_filter
 
                 if input.direction in ("outgoing", "both"):
                     out_deps = _collect_deps(
                         element, input.element_path, "outgoing",
                         input.result_level, input.include_descendants,
                     )
+                    if tf:
+                        out_deps = [d for d in out_deps if d.get("target", "").startswith(tf)]
                     result["outgoing"] = out_deps
 
                 if input.direction in ("incoming", "both"):
@@ -429,6 +487,8 @@ class ClaudeCodeProfile:
                         element, input.element_path, "incoming",
                         input.result_level, input.include_descendants,
                     )
+                    if tf:
+                        in_deps = [d for d in in_deps if d.get("source", "").startswith(tf)]
                     result["incoming"] = in_deps
 
                 return result
@@ -751,3 +811,213 @@ class ClaudeCodeProfile:
                 )
             except Exception as e:
                 return {"error": f"Security audit failed: {e}"}
+
+        @mcp.tool()
+        async def sgraph_cypher_query(input: CypherQueryInput):
+            """Run an openCypher query against the loaded model. Powerful and flexible.
+
+            Use this tool for complex graph queries that the other tools can't express:
+            - Multi-hop path queries, transitive dependencies
+            - Aggregation (count, group by)
+            - Complex filtering with AND/OR/NOT
+            - Joining different relationship types
+
+            The sgraph model is mapped to a labeled property graph:
+
+            Nodes (= code elements):
+              - Labels come from element type: :file, :class, :function, :dir, :method, etc.
+              - Properties: name, path (always present), plus all element attributes
+              - Elements without a type have no label
+
+            Relationships (= dependencies):
+              - Type comes from deptype: :imports, :function_ref, :call, :inc, :uses, etc.
+              - Properties: any edge-level attributes
+              - :CONTAINS relationships represent parent-child hierarchy (off by default)
+
+            Example queries:
+
+            "What files does main.py import?"
+            MATCH (a:file)-[:imports]->(b:file)
+            WHERE a.name = 'main.py'
+            RETURN b.name, b.path
+
+            "Count dependencies per file, top 10:"
+            MATCH (a:file)-[r]->(b)
+            WHERE type(r) <> 'CONTAINS'
+            RETURN a.name, count(r) AS deps ORDER BY deps DESC LIMIT 10
+
+            "Find all transitive imports from a file (up to 3 hops):"
+            MATCH (a:file)-[:imports*1..3]->(b)
+            WHERE a.name = 'app.py'
+            RETURN DISTINCT b.name, b.path
+
+            "Files with more than 500 lines of code:"
+            MATCH (f:file) WHERE f.loc > 500
+            RETURN f.name, f.loc ORDER BY f.loc DESC
+
+            "Does module A depend on module B? (directory-level)"
+            MATCH (a)-[r]->(b)
+            WHERE a.path STARTS WITH '/project/src/web/'
+              AND b.path STARTS WITH '/project/src/db/'
+              AND type(r) <> 'CONTAINS'
+            RETURN type(r), count(r) AS cnt ORDER BY cnt DESC
+
+            Performance notes:
+            - include_hierarchy=false (default) is faster, omits :CONTAINS edges
+            - Enable include_hierarchy only for parent-child traversal queries
+            - Large models take a few seconds for initial indexing (cached per model)
+            - Variable-length paths (*1..N) with large N can be slow
+
+            Returns JSON array of result rows. Read-only: CREATE/DELETE/SET not supported.
+            """
+            mid = input.model_id or model_manager.default_model_id
+            if not mid:
+                return {"error": "No model loaded. Call sgraph_load_model first."}
+            model = model_manager.get_model(mid)
+            if model is None:
+                return {"error": f"Model '{mid}' not found"}
+
+            try:
+                from sgraph.cypher import SGraphCypherBackend, SGraphCypherExecutor
+                import pandas as pd
+
+                backend = SGraphCypherBackend(
+                    root=model.rootNode,
+                    include_hierarchy=input.include_hierarchy,
+                )
+                executor = SGraphCypherExecutor(graph=backend)
+                result = executor.exec(input.query)
+
+                # Convert DataFrame to JSON-serializable list
+                if len(result) > input.limit:
+                    truncated = True
+                    result = result.head(input.limit)
+                else:
+                    truncated = False
+
+                rows = []
+                for _, row in result.iterrows():
+                    record = {}
+                    for col in result.columns:
+                        val = row[col]
+                        if val is pd.NA or val is None:
+                            record[col] = None
+                        elif isinstance(val, (int, float, bool, str)):
+                            record[col] = val
+                        elif isinstance(val, (set, frozenset)):
+                            record[col] = sorted(val)
+                        else:
+                            record[col] = str(val)
+                    rows.append(record)
+
+                resp = {"rows": rows, "count": len(rows)}
+                if truncated:
+                    resp["truncated"] = True
+                    resp["message"] = f"Results truncated to {input.limit} rows. Set limit higher if needed."
+                return resp
+
+            except ImportError:
+                return {
+                    "error": "Cypher support not available. Install: pip install spycy-aneeshdurg"
+                }
+            except Exception as e:
+                return {"error": f"Cypher query failed: {e}"}
+
+        @mcp.tool()
+        async def sgraph_query(input: SGraphQueryInput):
+            """Filter the model using SGraph Query Language — concise, architecture-native syntax.
+
+            Best for: filtering sub-models, checking module dependencies, attribute-based
+            element selection. Returns a filtered model (elements + associations), not tabular data.
+            For tabular queries and aggregation, use sgraph_cypher_query instead.
+
+            Syntax quick reference:
+
+            Element selection:
+              "/project/src/web"         Exact path (quoted, case-sensitive)
+              phone                      Keyword (unquoted, case-insensitive partial match)
+              "/path/*"                  Direct children    "/path/**"  All descendants
+
+            Attribute filters:
+              @type=file                 Attribute equals (contains match)
+              @type="file"               Exact match (quoted value)
+              @type!=dir                 Not equals
+              @loc>500                   Greater than (numeric)
+              @loc<100                   Less than
+              @name=~".*\\.py$"          Regex match
+              @loc                       Has attribute (any value)
+
+            Dependency queries:
+              "/src/web" --> "/src/db"    Directed: does web depend on db?
+              "/src/web" -- "/src/db"     Undirected: dependency in either direction
+              "/web" -import-> "/db"      Filter by dependency type
+              "*" --> "/src/db"           Wildcard: anything that depends on db
+              "/a" ---> "/b"             Chain search: all transitive paths (DFS)
+              "/a" --import-> "/b"       Chain with type filter
+              "/a" --- "/b"              Shortest undirected path (BFS)
+
+            Logical operators:
+              expr1 AND expr2            Sequential filter (intersection)
+              expr1 OR expr2             Union
+              NOT expr                   Complement
+              (expr)                     Grouping
+
+            Examples:
+              @type=file AND @loc>500
+              "/src" AND NOT "/src/External"
+              "/src/web" --> "/src/db"
+              (@type=file OR @type=dir) AND @loc>200
+
+            Returns JSON with elements (path, type, name) and associations (from, to, type).
+            """
+            mid = input.model_id or model_manager.default_model_id
+            if not mid:
+                return {"error": "No model loaded. Call sgraph_load_model first."}
+            model = model_manager.get_model(mid)
+            if model is None:
+                return {"error": f"Model '{mid}' not found"}
+
+            try:
+                from sgraph.query import query as sgraph_query_fn
+
+                result = sgraph_query_fn(model, input.expression)
+
+                # Collect elements (skip empty root)
+                elements = []
+
+                def collect_elem(e):
+                    if e.getPath():
+                        elements.append({
+                            "path": e.getPath(),
+                            "type": e.getType() or "element",
+                            "name": e.name,
+                        })
+
+                result.rootNode.traverseElements(collect_elem)
+
+                # Collect associations (deduplicated)
+                assoc_set = set()
+                associations = []
+
+                def collect_assocs(e):
+                    for a in e.outgoing:
+                        key = (id(a.fromElement), id(a.toElement), a.deptype)
+                        if key not in assoc_set:
+                            assoc_set.add(key)
+                            associations.append({
+                                "from": a.fromElement.getPath(),
+                                "to": a.toElement.getPath(),
+                                "type": a.deptype or "",
+                            })
+
+                result.rootNode.traverseElements(collect_assocs)
+
+                return {
+                    "elements": elements,
+                    "element_count": len(elements),
+                    "associations": associations,
+                    "association_count": len(associations),
+                }
+
+            except Exception as e:
+                return {"error": f"SGraph query failed: {e}"}
