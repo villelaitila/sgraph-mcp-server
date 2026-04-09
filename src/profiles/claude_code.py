@@ -982,6 +982,9 @@ class ClaudeCodeProfile:
 
                 result = sgraph_query_fn(model, input.expression)
 
+                # sgraph.query returns a QueryResult wrapping a .subgraph (SGraph)
+                subgraph = result.subgraph
+
                 # Collect elements (skip empty root)
                 elements = []
 
@@ -993,7 +996,7 @@ class ClaudeCodeProfile:
                             "name": e.name,
                         })
 
-                result.rootNode.traverseElements(collect_elem)
+                subgraph.rootNode.traverseElements(collect_elem)
 
                 # Collect associations (deduplicated)
                 assoc_set = set()
@@ -1010,7 +1013,7 @@ class ClaudeCodeProfile:
                                 "type": a.deptype or "",
                             })
 
-                result.rootNode.traverseElements(collect_assocs)
+                subgraph.rootNode.traverseElements(collect_assocs)
 
                 return {
                     "elements": elements,
