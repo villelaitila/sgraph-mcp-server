@@ -13,17 +13,37 @@ SGraph provides **pre-computed dependency graphs** that answer architectural que
 
 ## Quick Start
 
-```bash
-# Start the server with Claude Code profile (5 optimized tools)
-uv run python -m src.server --profile claude-code
+The recommended setup is **stdio transport launched directly by Claude Code** — no background server to manage, no port conflicts, and each Claude Code session gets its own instance with an auto-loaded model.
 
-# With auto-loaded model and default scope
-uv run python -m src.server --profile claude-code \
-  --auto-load /path/to/model.xml.zip \
-  --default-scope /Project/repo
+Add this to your `.mcp.json` in the project root:
+```json
+{
+  "mcpServers": {
+    "sgraph": {
+      "command": "uv",
+      "args": [
+        "run", "--directory", "/path/to/sgraph-mcp-server",
+        "python", "-m", "src.server",
+        "--profile", "claude-code",
+        "--transport", "stdio",
+        "--auto-load", "/path/to/model.xml.zip",
+        "--default-scope", "/Project/repo"
+      ]
+    }
+  }
+}
 ```
 
-Add to Claude Code's MCP config (`.mcp.json` in project root):
+Claude Code spawns the server over stdio on first tool call. No separate `uv run` needed.
+
+<details>
+<summary>Alternative: run the server manually (SSE transport)</summary>
+
+If you prefer a long-running server (e.g. shared across multiple clients), start it in SSE mode:
+```bash
+uv run python -m src.server --profile claude-code --transport sse --port 8008
+```
+And point Claude Code at it via the `mcp-remote` bridge:
 ```json
 {
   "mcpServers": {
@@ -34,6 +54,8 @@ Add to Claude Code's MCP config (`.mcp.json` in project root):
   }
 }
 ```
+
+</details>
 
 ## The 8 Tools
 

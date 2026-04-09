@@ -68,14 +68,16 @@ Create `.mcp.json` in your project root:
 </details>
 
 <details>
-<summary><strong>Any MCP client (SSE transport)</strong></summary>
+<summary><strong>Alternative: SSE transport (any MCP client, via <code>mcp-remote</code>)</strong></summary>
 
-Start the server with SSE (default):
+Stdio is the recommended transport for local use — no port, no bridge, direct IPC. SSE is available for clients that can only speak HTTP or when you want to share one long-running server across multiple clients.
+
+Start the server in SSE mode:
 ```bash
-uv run python -m src.server --profile claude-code --port 8008
+uv run python -m src.server --profile claude-code --transport sse --port 8008
 ```
 
-Then connect:
+Then connect any MCP client via the [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) bridge:
 ```json
 {
   "mcpServers": {
