@@ -5,24 +5,35 @@ This directory contains performance tests for the SGraph MCP Server to ensure th
 ## Test Files
 
 - `test_search_performance.py` - Tests the performance of `sgraph_search_elements_by_name`
-- `run_tests.py` - Test runner that executes all performance tests
+- `test_all_search_performance.py` - Search by name, type and attributes
+- `test_bulk_analysis_performance.py` - Subtree and dependency-chain analysis
+- `test_overview_performance.py` - `OverviewService.get_model_overview` across depths
+- `test_model_overview_performance.py` - Overview service and scalability with depth
 - `__init__.py` - Package initialization file
 
 ## Running Tests
 
-### Run Individual Test
+These are ordinary pytest tests - there is no separate runner to register them with.
+
+### Run All Performance Tests
 
 ```bash
-cd /path/to/sgraph-mcp-server
-uv run python performance_tests/test_search_performance.py
+uv run python tests/run_all_tests.py performance
+# or directly:
+uv run python -m pytest tests/performance/ -v
 ```
 
-### Run All Tests
+### Run a Single Test
 
 ```bash
-cd /path/to/sgraph-mcp-server
-uv run python performance_tests/run_tests.py
+uv run python -m pytest tests/performance/test_search_performance.py -v -s
 ```
+
+`-s` shows the per-measurement output, which is where the timings are reported.
+
+Both models used here (`tests/sgraph-and-mcp.xml.zip` and
+`sgraph-example-models/langchain.xml.zip`) are committed, so these run anywhere.
+They are **not** part of CI, which runs only `tests/unit/` and `tests/integration/`.
 
 ## Test Details
 
@@ -57,9 +68,11 @@ To add a new performance test:
 
 1. Create a new test function in the appropriate test file
 2. Follow the naming convention: `test_<operation>_performance`
-3. Include both performance and correctness assertions
-4. Add the test to `run_tests.py` if it's a new test file
-5. Update this README with test details
+3. Include both performance and correctness assertions - a timing bound alone
+   passes happily while the code under test returns nothing
+4. Update this README with test details
+
+pytest collects the file automatically; nothing needs registering.
 
 ## Test Data
 

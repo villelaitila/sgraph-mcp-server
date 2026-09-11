@@ -6,17 +6,20 @@ This test loads the langchain.xml.zip model and measures the performance
 of searching for the ConstitutionalPrinciple class element.
 """
 
-import asyncio
+
+import pytest
+import os
 import sys
 import time
 from pathlib import Path
 
 # Add src directory to path to import our modules
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from sgraph_helper import SGraphHelper
+from src.sgraph_helper import SGraphHelper
 
 
+@pytest.mark.asyncio
 async def test_search_performance():
     """Test the performance of sgraph_search_elements_by_name."""
     print("=== SGraph Search Performance Test ===")
@@ -28,8 +31,7 @@ async def test_search_performance():
     model_path = Path(__file__).parent.parent.parent / "sgraph-example-models" / "langchain.xml.zip"
     
     if not model_path.exists():
-        print(f"❌ Test model not found at: {model_path}")
-        return False
+        pytest.fail(f"Test model not found at: {model_path}")
     
     print(f"📁 Loading model from: {model_path}")
     
@@ -41,14 +43,12 @@ async def test_search_performance():
         load_duration = (load_end - load_start) * 1000  # Convert to milliseconds
         print(f"⏱️  Model loaded in: {load_duration:.2f} ms")
     except Exception as e:
-        print(f"❌ Failed to load model: {e}")
-        return False
+        pytest.fail(f"Failed to load model: {e}")
     
     # Get the model for direct access
     model = helper.get_model(model_id)
     if model is None:
-        print("❌ Failed to retrieve loaded model")
-        return False
+        pytest.fail("Failed to retrieve loaded model")
     
     print(f"📊 Model loaded successfully with ID: {model_id}")
     
@@ -91,40 +91,18 @@ async def test_search_performance():
         # Performance assertion
         max_duration_ms = 100
         if search_duration > max_duration_ms:
-            print(f"❌ PERFORMANCE FAILURE: Search took {search_duration:.2f} ms, expected < {max_duration_ms} ms")
-            return False
+            pytest.fail(f"PERFORMANCE FAILURE: Search took {search_duration:.2f} ms, expected < {max_duration_ms} ms")
         else:
             print(f"✅ PERFORMANCE PASS: Search completed within {max_duration_ms} ms limit")
         
         # Correctness assertion
         if not found_target:
-            print(f"❌ CORRECTNESS FAILURE: Target element not found")
-            return False
+            pytest.fail(f"CORRECTNESS FAILURE: Target element not found")
         else:
             print(f"✅ CORRECTNESS PASS: Target element found correctly")
-        
-        return True
-        
+
     except Exception as e:
         search_end = time.perf_counter()
         search_duration = (search_end - search_start) * 1000
-        print(f"❌ Search failed after {search_duration:.2f} ms: {e}")
-        return False
+        pytest.fail(f"Search failed after {search_duration:.2f} ms: {e}")
 
-
-async def main():
-    """Main test runner."""
-    print("Starting performance test...")
-    
-    success = await test_search_performance()
-    
-    if success:
-        print("\n🎉 All tests PASSED!")
-        sys.exit(0)
-    else:
-        print("\n💥 Tests FAILED!")
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())

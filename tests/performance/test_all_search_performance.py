@@ -8,17 +8,20 @@ This test measures the performance of:
 - sgraph_search_elements_by_attributes
 """
 
-import asyncio
+
+import pytest
+import os
 import sys
 import time
 from pathlib import Path
 
 # Add src directory to path to import our modules
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from sgraph_helper import SGraphHelper
+from src.sgraph_helper import SGraphHelper
 
 
+@pytest.mark.asyncio
 async def test_all_search_functions_performance():
     """Test the performance of all search functions with stack-based optimization."""
     print("=== Comprehensive Search Performance Test ===")
@@ -30,8 +33,7 @@ async def test_all_search_functions_performance():
     model_path = Path(__file__).parent.parent.parent / "sgraph-example-models" / "langchain.xml.zip"
     
     if not model_path.exists():
-        print(f"❌ Test model not found at: {model_path}")
-        return False
+        pytest.fail(f"Test model not found at: {model_path}")
     
     print(f"📁 Loading model from: {model_path}")
     
@@ -43,14 +45,12 @@ async def test_all_search_functions_performance():
         load_duration = (load_end - load_start) * 1000  # Convert to milliseconds
         print(f"⏱️  Model loaded in: {load_duration:.2f} ms")
     except Exception as e:
-        print(f"❌ Failed to load model: {e}")
-        return False
+        pytest.fail(f"Failed to load model: {e}")
     
     # Get the model for direct access
     model = helper.get_model(model_id)
     if model is None:
-        print("❌ Failed to retrieve loaded model")
-        return False
+        pytest.fail("Failed to retrieve loaded model")
     
     print(f"📊 Model loaded successfully with ID: {model_id}")
     print()
@@ -82,6 +82,12 @@ async def test_all_search_functions_performance():
             element.getPath() == expected_path and element.getType() == expected_type
             for element in results
         )
+        # `any` alone passes an implementation that ignores the filter entirely and
+        # returns the whole model, so check what every hit must satisfy.
+        off_pattern = [
+            e.getPath() for e in results
+            if search_pattern not in e.name or e.getType() != expected_type
+        ]
         
         if search_duration > 100:
             print(f"❌ PERFORMANCE FAILURE: Search took {search_duration:.2f} ms, expected < 100 ms")
@@ -89,12 +95,15 @@ async def test_all_search_functions_performance():
         elif not found_target:
             print(f"❌ CORRECTNESS FAILURE: Target element not found")
             all_tests_passed = False
+        elif off_pattern:
+            print(f"❌ CORRECTNESS FAILURE: {len(off_pattern)} result(s) match neither "
+                  f"pattern '{search_pattern}' nor type '{expected_type}', e.g. {off_pattern[0]}")
+            all_tests_passed = False
         else:
             print(f"✅ Search by name: PASSED")
         
-    except Exception as e:
-        print(f"❌ Search by name failed: {e}")
-        all_tests_passed = False
+    except Exception:
+        raise
     
     print()
     
@@ -120,6 +129,7 @@ async def test_all_search_functions_performance():
             element.getPath() == expected_path
             for element in results
         )
+        wrong_type = [e.getPath() for e in results if e.getType() != element_type]
         
         if search_duration > 200:  # More lenient since this finds many results
             print(f"❌ PERFORMANCE FAILURE: Search took {search_duration:.2f} ms, expected < 200 ms")
@@ -130,12 +140,15 @@ async def test_all_search_functions_performance():
         elif len(results) < 10:  # Should find many classes in langchain
             print(f"❌ CORRECTNESS FAILURE: Too few classes found, expected many more")
             all_tests_passed = False
+        elif wrong_type:
+            print(f"❌ CORRECTNESS FAILURE: {len(wrong_type)} result(s) are not "
+                  f"'{element_type}', e.g. {wrong_type[0]}")
+            all_tests_passed = False
         else:
             print(f"✅ Search by type: PASSED")
         
-    except Exception as e:
-        print(f"❌ Search by type failed: {e}")
-        all_tests_passed = False
+    except Exception:
+        raise
     
     print()
     
@@ -161,12 +174,17 @@ async def test_all_search_functions_performance():
             "Constitutional" in element.name
             for element in results
         )
+        off_filter = [e.getPath() for e in results if "Constitutional" not in e.name]
         
         if search_duration > 200:  # More lenient since this does regex matching
             print(f"❌ PERFORMANCE FAILURE: Search took {search_duration:.2f} ms, expected < 200 ms")
             all_tests_passed = False
         elif not found_target:
             print(f"❌ CORRECTNESS FAILURE: No elements with 'Constitutional' in name found")
+            all_tests_passed = False
+        elif off_filter:
+            print(f"❌ CORRECTNESS FAILURE: {len(off_filter)} result(s) do not match the "
+                  f"attribute filter, e.g. {off_filter[0]}")
             all_tests_passed = False
         else:
             print(f"✅ Search by attributes: PASSED")
@@ -175,29 +193,11 @@ async def test_all_search_functions_performance():
         for element in results[:3]:  # Show first 3 results
             print(f"   - {element.name} ({element.getType()}): {element.getPath()}")
         
-    except Exception as e:
-        print(f"❌ Search by attributes failed: {e}")
-        all_tests_passed = False
+    except Exception:
+        raise
     
     print()
     print("=" * 50)
     
-    return all_tests_passed
+    assert all_tests_passed, "performance or correctness checks failed; see output above"
 
-
-async def main():
-    """Main test runner."""
-    print("Starting comprehensive performance test...")
-    
-    success = await test_all_search_functions_performance()
-    
-    if success:
-        print("🎉 All search performance tests PASSED!")
-        sys.exit(0)
-    else:
-        print("💥 Some tests FAILED!")
-        sys.exit(1)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())

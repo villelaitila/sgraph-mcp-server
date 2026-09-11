@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
 """
 Comprehensive performance test for sgraph_get_model_overview tool
-Tests both the helper function and the MCP tool call performance
+Tests OverviewService.get_model_overview at a range of depths.
+The MCP tool layer is not covered here - both cases call the service directly
 """
 
-import asyncio
+
+import pytest
 import time
 import sys
 import os
-import json
 
 # Add src to path so we can import the modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from src.core.model_manager import ModelManager
 from src.services.overview_service import OverviewService
-from src.tools.model_tools import SGraphGetModelOverview
 
+@pytest.mark.asyncio
 async def test_helper_performance():
     """Test the direct service function performance"""
     
@@ -26,7 +27,7 @@ async def test_helper_performance():
     model_manager = ModelManager()
     
     # Test with the combined model
-    model_path = "/opt/softagram/output/projects/sgraph-and-mcp/latest.xml.zip"
+    model_path = os.path.join(os.path.dirname(__file__), "..", "sgraph-and-mcp.xml.zip")
     
     try:
         print(f"📁 Loading model from: {model_path}")
@@ -34,8 +35,7 @@ async def test_helper_performance():
         model = model_manager.get_model(model_id)
         
         if model is None:
-            print("❌ Failed to retrieve model")
-            return False
+            pytest.fail("Failed to retrieve model")
         
         print(f"✅ Model loaded successfully (ID: {model_id})")
         
@@ -49,7 +49,6 @@ async def test_helper_performance():
         ]
         
         all_passed = True
-        results = []
         
         for test_case in test_cases:
             depth = test_case["depth"]
@@ -86,29 +85,17 @@ async def test_helper_performance():
             # Check performance
             if avg_ms <= target_ms:
                 print(f"  ✅ PASSED (avg {avg_ms:.1f}ms ≤ {target_ms}ms target)")
-                status = "PASS"
             else:
                 print(f"  ❌ FAILED (avg {avg_ms:.1f}ms > {target_ms}ms target)")
                 all_passed = False
-                status = "FAIL"
             
-            results.append({
-                "depth": depth,
-                "description": description,
-                "avg_ms": avg_ms,
-                "target_ms": target_ms,
-                "status": status,
-                "elements": total_elements
-            })
-        
-        return all_passed, results
+        assert all_passed, "one or more measurements missed their target; see output above"
         
     except Exception as e:
         print(f"❌ Error during helper performance test: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return False, []
+        raise
 
+@pytest.mark.asyncio
 async def test_service_performance():
     """Test the service call performance"""
     
@@ -116,7 +103,7 @@ async def test_service_performance():
     
     # Initialize model manager and load model
     model_manager = ModelManager()
-    model_path = "/opt/softagram/output/projects/sgraph-and-mcp/latest.xml.zip"
+    model_path = os.path.join(os.path.dirname(__file__), "..", "sgraph-and-mcp.xml.zip")
     model_id = await model_manager.load_model(model_path)
     model = model_manager.get_model(model_id)
     
@@ -165,15 +152,16 @@ async def test_service_performance():
             print(f"  ❌ FAILED (avg {avg_ms:.1f}ms > {target_ms}ms target)")
             all_passed = False
     
-    return all_passed
+    assert all_passed, "one or more measurements missed their target; see output above"
 
+@pytest.mark.asyncio
 async def test_scalability():
     """Test tool performance with different model sizes"""
     
     print("\n📏 Testing scalability characteristics...")
     
     model_manager = ModelManager()
-    model_path = "/opt/softagram/output/projects/sgraph-and-mcp/latest.xml.zip"
+    model_path = os.path.join(os.path.dirname(__file__), "..", "sgraph-and-mcp.xml.zip")
     model_id = await model_manager.load_model(model_path)
     model = model_manager.get_model(model_id)
     
@@ -189,10 +177,14 @@ async def test_scalability():
         duration_ms = (end_time - start_time) * 1000
         elements = result['summary']['total_elements']
         
+        depth_counts = result['summary'].get('depth_counts', {})
+        max_seen = max((int(d) for d in depth_counts), default=0)
+
         scaling_results.append({
             "depth": depth,
             "duration_ms": duration_ms,
-            "elements": elements
+            "elements": elements,
+            "max_seen": max_seen
         })
         
         print(f"    Depth {depth}: {duration_ms:.1f}ms, {elements} elements")
@@ -209,49 +201,33 @@ async def test_scalability():
         efficiency = element_ratio / time_ratio if time_ratio > 0 else 0
         
         print(f"    Depth {prev['depth']}→{curr['depth']}: {efficiency:.1f}x efficiency (elements/time ratio)")
-    
-    return True
 
-async def main():
-    """Run all performance tests"""
-    
-    print("🚀 SGRAPH MODEL OVERVIEW PERFORMANCE TESTS")
-    print("=" * 50)
-    
-    # Test helper performance
-    helper_passed, helper_results = await test_helper_performance()
-    
-    # Test service performance
-    service_passed = await test_service_performance()
-    
-    # Test scalability
-    scale_passed = await test_scalability()
-    
-    # Summary
-    print("\n" + "=" * 50)
-    print("📊 PERFORMANCE TEST SUMMARY")
-    print("=" * 50)
-    
-    if helper_results:
-        print("\n🔧 Helper Function Results:")
-        for result in helper_results:
-            status_icon = "✅" if result["status"] == "PASS" else "❌"
-            print(f"  {status_icon} Depth {result['depth']}: {result['avg_ms']:.1f}ms ({result['elements']} elements)")
-    
-    print(f"\n🛠️  Service Performance: {'✅ PASSED' if service_passed else '❌ FAILED'}")
-    print(f"📏 Scalability Test: {'✅ PASSED' if scale_passed else '❌ FAILED'}")
-    
-    overall_success = helper_passed and service_passed and scale_passed
-    
-    if overall_success:
-        print("\n🎉 ALL PERFORMANCE TESTS PASSED!")
-        print("   The sgraph_get_model_overview tool is ready for production use.")
-        return True
-    else:
-        print("\n❌ SOME PERFORMANCE TESTS FAILED")
-        print("   Review the results above and optimize as needed.")
-        return False
+    # The per-step efficiency ratios above are noise at sub-millisecond timings, so
+    # assert on what is stable. Absolute wall-clock alone is a weak guard: a 100x
+    # constant-factor regression still lands inside any bound loose enough to
+    # survive a slow machine. Cost per element does not have that blind spot, and
+    # the structural checks catch an overview that returns nothing or quietly
+    # ignores max_depth - both of which a pure timing assertion rates as excellent.
+    for prev, curr in zip(scaling_results, scaling_results[1:]):
+        assert curr["elements"] > prev["elements"], (
+            f"depth {curr['depth']} returned {curr['elements']} elements, "
+            f"not more than depth {prev['depth']} at {prev['elements']}"
+        )
 
-if __name__ == "__main__":
-    success = asyncio.run(main())
-    sys.exit(0 if success else 1)
+    for row in scaling_results:
+        assert row["max_seen"] == row["depth"], (
+            f"asked for depth {row['depth']} but the tree reaches {row['max_seen']}"
+        )
+
+    deepest = scaling_results[-1]
+    assert deepest["elements"] > 1000, (
+        f"fixture model yielded only {deepest['elements']} elements at depth "
+        f"{deepest['depth']}; expected >1000 - has the test model changed?"
+    )
+
+    us_per_element = deepest["duration_ms"] / deepest["elements"] * 1000
+    assert us_per_element < 20, (
+        f"overview cost {us_per_element:.2f} us/element, expected < 20 "
+        f"({deepest['duration_ms']:.1f}ms for {deepest['elements']} elements)"
+    )
+

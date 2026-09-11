@@ -3,7 +3,8 @@
 Performance test for sgraph_get_model_overview
 """
 
-import asyncio
+
+import pytest
 import time
 import sys
 import os
@@ -14,6 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from src.core.model_manager import ModelManager
 from src.services.overview_service import OverviewService
 
+@pytest.mark.asyncio
 async def test_overview_performance():
     """Test the performance of the model overview functionality"""
     
@@ -23,7 +25,7 @@ async def test_overview_performance():
     model_manager = ModelManager()
     
     # Test with the combined model
-    model_path = "/opt/softagram/output/projects/sgraph-and-mcp/latest.xml.zip"
+    model_path = os.path.join(os.path.dirname(__file__), "..", "sgraph-and-mcp.xml.zip")
     
     try:
         print(f"📁 Loading model from: {model_path}")
@@ -31,8 +33,7 @@ async def test_overview_performance():
         model = model_manager.get_model(model_id)
         
         if model is None:
-            print("❌ Failed to retrieve model")
-            return False
+            pytest.fail("Failed to retrieve model")
         
         print(f"✅ Model loaded successfully")
         
@@ -54,7 +55,7 @@ async def test_overview_performance():
             print(f"\n📊 Testing depth {depth} (target: <{expected_max_ms}ms)...")
             
             # Warm up
-            sgh.get_model_overview(model, max_depth=depth, include_counts=True)
+            OverviewService.get_model_overview(model, max_depth=depth, include_counts=True)
             
             # Measure performance
             start_time = time.perf_counter()
@@ -84,33 +85,60 @@ async def test_overview_performance():
         # Test with include_counts=False for performance comparison
         print(f"\n🚀 Testing performance without counts...")
         start_time = time.perf_counter()
-        result_no_counts = sgh.get_model_overview(model, max_depth=3, include_counts=False)
+        result_no_counts = OverviewService.get_model_overview(model, max_depth=3, include_counts=False)
         end_time = time.perf_counter()
         duration_no_counts = (end_time - start_time) * 1000
         
         start_time = time.perf_counter()
-        result_with_counts = sgh.get_model_overview(model, max_depth=3, include_counts=True)
+        result_with_counts = OverviewService.get_model_overview(model, max_depth=3, include_counts=True)
         end_time = time.perf_counter()
         duration_with_counts = (end_time - start_time) * 1000
         
         print(f"  Without counts: {duration_no_counts:.1f}ms")
         print(f"  With counts: {duration_with_counts:.1f}ms")
-        print(f"  Overhead: {duration_with_counts - duration_no_counts:.1f}ms ({((duration_with_counts / duration_no_counts - 1) * 100):.1f}%)")
-        
-        print(f"\n{'='*50}")
-        if all_passed:
-            print("🎉 ALL PERFORMANCE TESTS PASSED!")
-            return True
+        if duration_no_counts > 0:
+            overhead_pct = (duration_with_counts / duration_no_counts - 1) * 100
+            print(f"  Overhead: {duration_with_counts - duration_no_counts:.1f}ms ({overhead_pct:.1f}%)")
         else:
-            print("❌ Some performance tests failed")
-            return False
+            print(f"  Overhead: {duration_with_counts - duration_no_counts:.1f}ms")
+
+        # Comparing the two timings is meaningless unless include_counts actually did
+        # something. Counts are what the flag buys, so require them to appear when it
+        # is on and stay away when it is off.
+        def walk(node):
+            yield node
+            for child in node.get('children', {}).values():
+                yield from walk(child)
+
+        counted = list(walk(result_with_counts['tree_structure']))
+        uncounted = list(walk(result_no_counts['tree_structure']))
+        assert all('child_count' in n for n in counted), (
+            "include_counts=True returned nodes without child_count"
+        )
+        assert not any('child_count' in n for n in uncounted), (
+            "include_counts=False returned nodes carrying counts anyway"
+        )
+
+        # A tree that has lost its shape reports excellent timings, so tie it back to
+        # the summary the same call produced.
+        assert len(counted) == result_with_counts['summary']['total_elements'], (
+            f"tree holds {len(counted)} nodes but summary claims "
+            f"{result_with_counts['summary']['total_elements']}"
+        )
+        for node in counted:
+            assert {'name', 'path', 'type', 'depth'} <= node.keys(), (
+                f"malformed overview node: {sorted(node.keys())}"
+            )
+            for child in node.get('children', {}).values():
+                assert child['depth'] == node['depth'] + 1, (
+                    f"child of depth {node['depth']} reports depth {child['depth']}"
+                )
+
+        print(f"\n{'='*50}")
+        if not all_passed:
+            pytest.fail("one or more measurements missed their target; see output above")
             
     except Exception as e:
         print(f"❌ Error during performance test: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return False
+        raise
 
-if __name__ == "__main__":
-    success = asyncio.run(test_overview_performance())
-    sys.exit(0 if success else 1)
