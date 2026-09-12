@@ -19,7 +19,7 @@ def run_tests(test_type: str = "all"):
     test_commands = {
         "unit": ["python", "-m", "pytest", "tests/unit/", "-v"],
         "integration": ["python", "-m", "pytest", "tests/integration/", "-v"],
-        "performance": ["python", "tests/performance/run_tests.py"],
+        "performance": ["python", "-m", "pytest", "tests/performance/", "-v"],
         "all": ["python", "-m", "pytest", "tests/", "-v", "--tb=short"]
     }
     
